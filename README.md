@@ -178,7 +178,7 @@ pip install "calm-data-generator[full]"
 ```
 
 > [!NOTE]
-> **Performance Note**: We have optimized the dependency tree in version 1.0.0 by pinning specific versions of `pydantic`, `xgboost`, and `cloudpickle`. This significantly reduces the initial installation time from ~40 minutes to just a few minutes. 🚀
+> **Performance & Stability Note**: We have optimized the dependency tree in version 1.0.0 by pinning specific versions such as `scgen==2.1.1` (commit `d79e1f`), `pydantic`, `xgboost`, and `cloudpickle`. This improves compatibility and reduces installation issues. 🚀
 
 **From source (GitHub - Latest Updates):**
 Use this method to get the latest bug fixes and features not yet released on PyPI.
@@ -428,6 +428,7 @@ reporter.generate_report(
     target_col="target"
 )
 # Report saved to ./quality_report/report.html
+# Results JSON (including compared_data_files) saved to ./quality_report/report_results.json
 ```
 
 ---

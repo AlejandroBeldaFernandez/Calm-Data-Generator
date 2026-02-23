@@ -100,6 +100,9 @@ injector = DriftInjector(
 )
 ```
 
+> [!TIP]
+> **Dashboard Compatibility**: The generated `report_results.json` now includes `compared_data_files` metadata. This ensures full compatibility with the monitoring dashboard for visualizing drift comparisons.
+
 ### Feature Drift Methods
 
 #### `inject_feature_drift()` - Abrupt Shift

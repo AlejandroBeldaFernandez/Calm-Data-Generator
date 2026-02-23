@@ -100,6 +100,18 @@ reporter.generate_comprehensive_report(
 )
 ```
 
+### `calculate_quality_metrics`
+Calcula métricas de calidad (SDMetrics) para dos conjuntos de datos sin generar un informe completo.
+
+```python
+reporter = QualityReporter(verbose=False)
+metrics = reporter.calculate_quality_metrics(
+    real_df=df1, 
+    synthetic_df=df2
+)
+# Devuelve: {'overall_quality_score': 0.85, 'weighted_quality_score': 0.82}
+```
+
 ## Reporter Discriminador (Adversarial Validation)
 **Módulo:** `calm_data_generator.reports.DiscriminatorReporter`
 
@@ -156,6 +168,26 @@ Una versión especializada de `StreamReporter` para datos clínicos. Hereda capa
 ```python
 reporter = ClinicReporter()
 reporter.generate_report(...)
+```
+
+### JSON de Resultados del Reporte (`report_results.json`)
+Cada reporte genera un archivo `report_results.json` que contiene las métricas en bruto:
+
+```json
+{
+  "generator_name": "MyGenerator",
+  "generation_timestamp": "2024-01-01T12:00:00",
+  "real_rows": 1000,
+  "synthetic_rows": 1000,
+  "quality_scores": {
+    "overall_quality_score": 0.85,
+    "weighted_quality_score": 0.82
+  },
+  "compared_data_files": {
+    "original": "real_data",
+    "generated": "synthetic_data"
+  }
+}
 ```
 
 > [!NOTE]
