@@ -46,14 +46,7 @@ def test_timegan_availability(sequential_data):
     except Exception as e:
         # Catch pydantic validaton errors or implementation placeholders
         # TimeGAN in synthcity is fragile to input format
-        if (
-            "validation error" in str(e).lower()
-            or "not implemented" in str(e).lower()
-            or "missing" in str(e).lower()
-        ):
-            pytest.skip(f"TimeGAN skipped: {e}")
-        else:
-            pytest.fail(f"TimeGAN execution failed: {e}")
+        pytest.fail(f"TimeGAN execution failed: {e}")
 
 
 def test_real_generator_with_time_col(sequential_data):

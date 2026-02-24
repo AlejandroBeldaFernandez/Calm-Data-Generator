@@ -1094,9 +1094,92 @@ class RealGenerator(BaseGenerator):
             lr=lr,
         )
 
-        # Prepare time series data
-        # TimeSeriesDataLoader expects data in specific format
-        loader = TimeSeriesDataLoader(data)
+        # Prepare time series data for TimeSeriesDataLoader.
+        # synthcity expects:
+        #   temporal_data: list of DataFrames, one per sequence (numeric features only)
+        #   observation_times: list of numeric arrays, one per sequence
+        #   outcome: optional per-sequence outcome Series
+        sequence_key = kwargs.get("sequence_key", None)
+        time_key = kwargs.get("time_key", None)
+        target_col = kwargs.get("target_col", None)
+
+        import pandas.api.types as pat
+
+        def _to_numeric_times(times_array):
+            """Convert datetime arrays to numeric seconds from sequence start."""
+            s = pd.Series(times_array)
+            if pat.is_datetime64_any_dtype(s) or pat.is_object_dtype(s):
+                try:
+                    s = pd.to_datetime(s)
+                    s = (s - s.iloc[0]).dt.total_seconds().astype(float)
+                except Exception:
+                    s = pd.Series(range(len(times_array)), dtype=float)
+            return s.tolist()
+
+        if sequence_key and sequence_key in data.columns:
+            exclude = {sequence_key}
+            if time_key:
+                exclude.add(time_key)
+            # Separate target (static per sequence) from temporal features
+            if target_col and target_col in data.columns:
+                exclude.add(target_col)
+                # Outcome: one value per sequence (first value, since it's constant)
+                outcome_series = (
+                    data.groupby(sequence_key)[target_col]
+                    .first()
+                    .reset_index(drop=True)
+                )
+            else:
+                outcome_series = None
+
+            feature_cols = [c for c in data.columns if c not in exclude]
+            temporal_data = []
+            observation_times = []
+            for _, grp in data.groupby(sequence_key, sort=False):
+                grp = grp.reset_index(drop=True)
+                if time_key and time_key in grp.columns:
+                    obs_times = _to_numeric_times(grp[time_key].values)
+                else:
+                    obs_times = list(range(len(grp)))
+                temporal_data.append(grp[feature_cols].reset_index(drop=True))
+                observation_times.append(obs_times)
+
+            # synthcity requires outcome as DataFrame, not Series
+            _outcome = (
+                outcome_series.to_frame()
+                if outcome_series is not None
+                else pd.DataFrame({"outcome": [0] * len(temporal_data)})
+            )
+            loader = TimeSeriesDataLoader(
+                temporal_data=temporal_data,
+                observation_times=observation_times,
+                outcome=_outcome,
+            )
+        else:
+            # Fallback: treat the entire DataFrame as ONE multi-step sequence.
+            # This is the correct approach for a flat time series with no sequence_key.
+            exclude = set()
+            if target_col and target_col in data.columns:
+                exclude.add(target_col)
+                outcome_series = (
+                    data[target_col].iloc[[0]].reset_index(drop=True)
+                )  # one outcome per sequence
+            else:
+                outcome_series = None
+            feature_cols = [c for c in data.columns if c not in exclude]
+            temporal_data = [data[feature_cols].reset_index(drop=True)]
+            observation_times = [list(range(len(data)))]
+            # synthcity requires outcome as DataFrame, not Series
+            _outcome = (
+                outcome_series.to_frame()
+                if outcome_series is not None
+                else pd.DataFrame({"outcome": [0]})
+            )
+            loader = TimeSeriesDataLoader(
+                temporal_data=temporal_data,
+                observation_times=observation_times,
+                outcome=_outcome,
+            )
 
         # Train
         self.logger.info(f"Training TimeGAN for {n_iter} epochs...")
@@ -1162,8 +1245,81 @@ class RealGenerator(BaseGenerator):
             lr=lr,
         )
 
-        # Prepare time series data
-        loader = TimeSeriesDataLoader(data)
+        # Prepare time series data for TimeSeriesDataLoader — same logic as _synthesize_timegan.
+        # synthcity requires temporal_data as list of DataFrames, observation_times as list of
+        # numeric arrays, and outcome as a DataFrame (not a flat input DataFrame).
+        import pandas.api.types as pat
+
+        sequence_key = kwargs.get("sequence_key", None)
+        time_key = kwargs.get("time_key", None)
+        target_col = kwargs.get("target_col", None)
+
+        def _to_numeric_times(times_array):
+            s = pd.Series(times_array)
+            if pat.is_datetime64_any_dtype(s) or pat.is_object_dtype(s):
+                try:
+                    s = pd.to_datetime(s)
+                    s = (s - s.iloc[0]).dt.total_seconds().astype(float)
+                except Exception:
+                    s = pd.Series(range(len(times_array)), dtype=float)
+            return s.tolist()
+
+        if sequence_key and sequence_key in data.columns:
+            exclude = {sequence_key}
+            if time_key:
+                exclude.add(time_key)
+            if target_col and target_col in data.columns:
+                exclude.add(target_col)
+                outcome_series = (
+                    data.groupby(sequence_key)[target_col]
+                    .first()
+                    .reset_index(drop=True)
+                )
+            else:
+                outcome_series = None
+            feature_cols = [c for c in data.columns if c not in exclude]
+            temporal_data = []
+            observation_times = []
+            for _, grp in data.groupby(sequence_key, sort=False):
+                grp = grp.reset_index(drop=True)
+                obs_times = (
+                    _to_numeric_times(grp[time_key].values)
+                    if time_key and time_key in grp.columns
+                    else list(range(len(grp)))
+                )
+                temporal_data.append(grp[feature_cols].reset_index(drop=True))
+                observation_times.append(obs_times)
+            _outcome = (
+                outcome_series.to_frame()
+                if outcome_series is not None
+                else pd.DataFrame({"outcome": [0] * len(temporal_data)})
+            )
+            loader = TimeSeriesDataLoader(
+                temporal_data=temporal_data,
+                observation_times=observation_times,
+                outcome=_outcome,
+            )
+        else:
+            # Fallback: treat the entire DataFrame as ONE multi-step sequence.
+            exclude = set()
+            if target_col and target_col in data.columns:
+                exclude.add(target_col)
+                outcome_series = data[target_col].iloc[[0]].reset_index(drop=True)
+            else:
+                outcome_series = None
+            feature_cols = [c for c in data.columns if c not in exclude]
+            temporal_data = [data[feature_cols].reset_index(drop=True)]
+            observation_times = [list(range(len(data)))]
+            _outcome = (
+                outcome_series.to_frame()
+                if outcome_series is not None
+                else pd.DataFrame({"outcome": [0]})
+            )
+            loader = TimeSeriesDataLoader(
+                temporal_data=temporal_data,
+                observation_times=observation_times,
+                outcome=_outcome,
+            )
 
         # Train
         self.logger.info(f"Training TimeVAE for {n_iter} epochs...")

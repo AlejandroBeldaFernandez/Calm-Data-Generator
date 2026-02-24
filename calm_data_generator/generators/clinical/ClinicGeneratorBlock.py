@@ -1,9 +1,7 @@
 import os
 import pandas as pd
 from typing import List, Dict, Optional, Any
-from calm_data_generator.generators.stream.StreamBlockGenerator import (
-    SyntheticBlockGenerator,
-)
+
 from calm_data_generator.generators.drift.DriftInjector import DriftInjector
 from calm_data_generator.generators.dynamics.ScenarioInjector import ScenarioInjector
 from calm_data_generator.generators.clinical.Clinic import (
@@ -15,11 +13,10 @@ from calm_data_generator.generators.configs import DriftConfig, ReportConfig
 from typing import Union
 
 
-class ClinicalDataGeneratorBlock(SyntheticBlockGenerator):
+class ClinicalDataGeneratorBlock:
     """
     Generator for Clinical data blocks.
-    Wraps SyntheticBlockGenerator logic but utilizes ClinicalDataGenerator for feature mapping
-    and ClinicReporter for specialized reporting.
+    Utilizes ClinicalDataGenerator for feature mapping and ClinicReporter for specialized reporting.
     """
 
     def generate(
@@ -29,9 +26,10 @@ class ClinicalDataGeneratorBlock(SyntheticBlockGenerator):
         n_blocks: int,
         total_samples: int,
         n_samples_block,
-        generators,
+        n_genes: int = 200,
+        n_proteins: int = 50,
+        control_disease_ratio: float = 0.5,
         target_col="target",
-        balance: bool = False,
         date_start: str = None,
         date_step: dict = None,
         date_col: str = "timestamp",
@@ -40,12 +38,10 @@ class ClinicalDataGeneratorBlock(SyntheticBlockGenerator):
         dynamics_config: Optional[Dict] = None,
         block_labels: Optional[List[Any]] = None,
         report_config: Optional[Union[ReportConfig, Dict]] = None,
+        **kwargs,
     ) -> str:
-        # Reuse helper from parent to ensure lists
-        n_samples_block = self._ensure_list(n_samples_block, n_blocks)
-        generators = self._ensure_list(generators, n_blocks)
-        if len(set(type(g) for g in generators)) > 1:
-            raise ValueError("All generator instances must be of the same type.")
+        if not isinstance(n_samples_block, list):
+            n_samples_block = [n_samples_block] * n_blocks
 
         if sum(n_samples_block) != total_samples:
             raise ValueError(
@@ -74,7 +70,6 @@ class ClinicalDataGeneratorBlock(SyntheticBlockGenerator):
         clinic_generator = ClinicalDataGenerator()
 
         for i in range(n_blocks):
-            gen = generators[i]
             n_samples_this_block = n_samples_block[i]
             current_block_label = block_labels[i]
 
@@ -85,17 +80,17 @@ class ClinicalDataGeneratorBlock(SyntheticBlockGenerator):
                     date_col=date_col, start_date=block_dates[i].isoformat()
                 )
 
+            # Pass explicit params and kwargs directly to clinic generator
             block_df = clinic_generator.generate(
-                generator_instance=gen,
-                metadata_generator_instance=gen,
                 output_dir=output_dir,
-                filename=f"block_{str(current_block_label)}.csv",
                 n_samples=n_samples_this_block,
-                target_col=target_col,
-                balance=balance,
-                date_config=date_conf,  # Pass DateConfig object
+                n_genes=n_genes,
+                n_proteins=n_proteins,
+                date_config=date_conf,
                 save_dataset=False,
                 generate_report=False,  # We aggregate at the end
+                control_disease_ratio=control_disease_ratio,
+                **kwargs,
             )
 
             # ClinicalDataGenerator returns a dict of DataFrames (demographics, genes, proteins)

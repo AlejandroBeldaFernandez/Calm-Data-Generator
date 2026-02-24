@@ -2,6 +2,7 @@
 Tests for time series synthesis methods using Synthcity.
 
 This file tests TimeGAN and TimeVAE methods for temporal data synthesis.
+Both models require multi-sequence data with a sequence_key.
 """
 
 import pandas as pd
@@ -11,20 +12,27 @@ import pytest
 
 @pytest.fixture
 def time_series_data():
-    """Create sample time series data for testing."""
+    """Create multi-sequence time series data for testing.
+
+    synthcity's TimeGAN and TimeVAE require multiple sequences, so we create
+    10 sequences of 20 steps each, identifiable by a sequence_key column.
+    """
     np.random.seed(42)
-    n_timesteps = 50
-    n_features = 3
+    n_sequences = 10
+    seq_len = 20
 
-    # Create simple time series with temporal patterns
-    time = np.arange(n_timesteps)
-    data = {
-        "time": time,
-        "feature1": np.sin(time / 5) + np.random.normal(0, 0.1, n_timesteps),
-        "feature2": np.cos(time / 5) + np.random.normal(0, 0.1, n_timesteps),
-        "feature3": time / 10 + np.random.normal(0, 0.5, n_timesteps),
-    }
-
+    data = []
+    for i in range(n_sequences):
+        for t in range(seq_len):
+            data.append(
+                {
+                    "seq_id": i,
+                    "time": t,
+                    "feature1": np.sin(t / 5.0) + np.random.normal(0, 0.1),
+                    "feature2": np.cos(t / 5.0) + np.random.normal(0, 0.1),
+                    "feature3": t / 10.0 + np.random.normal(0, 0.5),
+                }
+            )
     return pd.DataFrame(data)
 
 
@@ -37,9 +45,11 @@ def test_timegan_synthesis(time_series_data):
     try:
         synth = gen.generate(
             time_series_data,
-            n_samples=10,  # Generate 10 sequences
+            n_samples=5,
             method="timegan",
-            n_iter=10,  # Very low for testing
+            sequence_key="seq_id",
+            time_key="time",
+            n_iter=10,
             n_units_hidden=50,
             batch_size=16,
         )
@@ -49,8 +59,7 @@ def test_timegan_synthesis(time_series_data):
     except ImportError:
         pytest.skip("Synthcity not available for TimeGAN")
     except Exception as e:
-        # TimeGAN may require specific data format
-        pytest.skip(f"TimeGAN requires specific data format: {e}")
+        pytest.fail(f"TimeGAN test failed: {e}")
 
 
 def test_timevae_synthesis(time_series_data):
@@ -62,9 +71,11 @@ def test_timevae_synthesis(time_series_data):
     try:
         synth = gen.generate(
             time_series_data,
-            n_samples=10,  # Generate 10 sequences
+            n_samples=5,
             method="timevae",
-            n_iter=10,  # Very low for testing
+            sequence_key="seq_id",
+            time_key="time",
+            n_iter=10,
             decoder_n_units_hidden=50,
             batch_size=16,
         )
@@ -74,22 +85,22 @@ def test_timevae_synthesis(time_series_data):
     except ImportError:
         pytest.skip("Synthcity not available for TimeVAE")
     except Exception as e:
-        # TimeVAE may require specific data format
-        pytest.skip(f"TimeVAE requires specific data format: {e}")
+        pytest.fail(f"TimeVAE test failed: {e}")
 
 
 def test_timevae_parameters(time_series_data):
-    """Test TimeVAE with different parameters."""
+    """Test TimeVAE with different decoder parameters."""
     from calm_data_generator.generators.tabular import RealGenerator
 
     gen = RealGenerator(auto_report=False)
 
     try:
-        # Test with different decoder configurations
         synth = gen.generate(
             time_series_data,
             n_samples=5,
             method="timevae",
+            sequence_key="seq_id",
+            time_key="time",
             n_iter=5,
             decoder_n_layers_hidden=1,
             decoder_n_units_hidden=32,
@@ -101,4 +112,4 @@ def test_timevae_parameters(time_series_data):
     except ImportError:
         pytest.skip("Synthcity not available for TimeVAE")
     except Exception as e:
-        pytest.skip(f"TimeVAE test skipped: {e}")
+        pytest.fail(f"TimeVAE parameters test failed: {e}")

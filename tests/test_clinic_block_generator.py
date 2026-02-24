@@ -2,20 +2,6 @@ import unittest
 import pandas as pd
 import shutil
 import os
-import pytest
-
-try:
-    from river import synth
-
-    RIVER_AVAILABLE = True
-except ImportError:
-    try:
-        from river.datasets import synth
-
-        RIVER_AVAILABLE = True
-    except ImportError:
-        RIVER_AVAILABLE = False
-        synth = None
 
 from calm_data_generator.generators.clinical.ClinicGeneratorBlock import (
     ClinicalDataGeneratorBlock,
@@ -23,7 +9,6 @@ from calm_data_generator.generators.clinical.ClinicGeneratorBlock import (
 from calm_data_generator.generators.configs import DriftConfig, ReportConfig
 
 
-@pytest.mark.skipif(not RIVER_AVAILABLE, reason="River/Synth not installed")
 class TestClinicalBlockGenerator(unittest.TestCase):
     def setUp(self):
         self.output_dir = "test_output_clinic_block"
@@ -39,11 +24,7 @@ class TestClinicalBlockGenerator(unittest.TestCase):
         self.assertIsInstance(gen, ClinicalDataGeneratorBlock)
 
     def test_generate_clinical_blocks(self):
-        if not RIVER_AVAILABLE:
-            pytest.skip("River not available")
-
         gen = ClinicalDataGeneratorBlock()
-        river_gen = synth.Agrawal(seed=42)
 
         full_path = gen.generate(
             output_dir=self.output_dir,
@@ -51,7 +32,8 @@ class TestClinicalBlockGenerator(unittest.TestCase):
             n_blocks=2,
             total_samples=20,
             n_samples_block=[10, 10],
-            generators=[river_gen, river_gen],
+            n_genes=5,
+            n_proteins=5,
             target_col="diagnosis",
             generate_report=False,
         )
@@ -63,16 +45,13 @@ class TestClinicalBlockGenerator(unittest.TestCase):
         self.assertEqual(set(df["block"].unique()), {1, 2})
         self.assertTrue("Age" in df.columns)
 
-    def test_generate_with_config_objects(self):
+    def test_generate_with_drift_and_report_config(self):
         """Test with DriftConfig and ReportConfig."""
-        if not RIVER_AVAILABLE:
-            pytest.skip("River not available")
-
         gen = ClinicalDataGeneratorBlock()
-        river_gen = synth.Agrawal(seed=42)
 
         drift_conf = DriftConfig(
-            method="inject_feature_drift", params={"missing_fraction": 0.1}
+            method="inject_feature_drift",
+            params={"missing_fraction": 0.1, "columns": ["Age"]},
         )
         report_conf = ReportConfig(
             output_dir=self.output_dir, target_column="diagnosis"
@@ -84,7 +63,8 @@ class TestClinicalBlockGenerator(unittest.TestCase):
             n_blocks=1,
             total_samples=10,
             n_samples_block=[10],
-            generators=[river_gen],
+            n_genes=5,
+            n_proteins=5,
             target_col="diagnosis",
             drift_config=[drift_conf],
             report_config=report_conf,
