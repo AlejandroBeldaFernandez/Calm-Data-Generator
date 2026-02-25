@@ -17,14 +17,15 @@ from calm_data_generator.generators.tabular import RealGenerator, QualityReporte
 | `lgbm` | LightGBM synthesis |
 | `ctgan` | CTGAN (deep learning) |
 | `tvae` | TVAE (variational autoencoder) |
-| `bayesian` | Bayesian Network |
+| `bn` | Bayesian Network (causal structure) |
 | `smote` | SMOTE oversampling |
 | `adasyn` | ADASYN adaptive sampling |
 
 | `diffusion` | Tabular Diffusion (DDPM) |
 | `ddpm` | Synthcity TabDDPM (advanced) |
 | `timegan` | TimeGAN (time series) |
-| `timevae` | TimeVAE (time series) |
+| `timevae` | TimeVAE (time series VAE) |
+| `fflows` | FourierFlows (periodic time series) |
 
 
 

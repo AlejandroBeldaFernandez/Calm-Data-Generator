@@ -940,6 +940,84 @@ synth = gen.generate(
 
 ---
 
+### `fflows` - FourierFlows (Frequency-Domain Normalizing Flows for Time Series)
+
+**Type:** Deep Learning (Normalizing Flows for Time Series)  
+**Best For:** Periodic/quasi-periodic time series, stable alternative to TimeGAN  
+**Requirements:** `synthcity`
+
+#### Description
+
+FourierFlows (`fflows`) applies normalizing flows in the frequency domain to generate temporal sequences. It is generally more stable than TimeGAN and excels at series with periodic patterns (sinusoidal, seasonal).
+
+#### Parameters
+
+```python
+synth = gen.generate(
+    data,
+    method='fflows',
+    n_samples=100,
+    sequence_key='seq_id',   # Column identifying each sequence
+    time_key='timestamp',    # Column with timestamps
+    n_iter=1000,             # Training epochs (default: 1000)
+    batch_size=128,          # Batch size (default: 128)
+    lr=0.001,                # Learning rate (default: 0.001)
+)
+```
+
+#### Comparison: `timegan` vs `timevae` vs `fflows`
+
+| Aspect | `timegan` | `timevae` | `fflows` |
+|--------|-----------|-----------|----------|
+| **Speed** | 🐢 Slow | ⚡ Fast | ⚡ Fast |
+| **Quality** | ⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐ |
+| **Stability** | Low | Medium | High |
+| **Best for** | Complex patterns | Regular series | Periodic series |
+
+---
+
+### `bn` - Bayesian Network
+
+**Type:** Probabilistic Graphical Model  
+**Best For:** Clinical/structured tabular data with causal dependencies between variables  
+**Requirements:** `synthcity`
+
+#### Description
+
+A Bayesian Network (BN) models the conditional dependencies between variables using a directed acyclic graph. Structure learning discovers which variables causally influence others. Especially useful for healthcare and clinical data where domain causal knowledge matters.
+
+#### Parameters
+
+```python
+synth = gen.generate(
+    data,
+    method='bn',
+    n_samples=1000,
+    target_col='diagnosis',  # Optional target column
+    # Additional parameters passed to Synthcity BN plugin
+)
+```
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `n_iter` | 1000 | Training iterations |
+| `struct_learning_n_iter` | 1000 | Structure learning iterations |
+| `struct_learning_search_method` | `'tree_search'` | Structure learning method |
+
+#### When to Use
+
+✅ **Use `bn` when:**
+- Data has **causal relationships** between variables (e.g., diagnosis ← symptoms ← lab values)
+- Working with **clinical or epidemiological** datasets
+- You want an **interpretable model** (the network is inspectable)
+- Dataset is **small to medium** size
+
+❌ **Don't use `bn` when:**
+- Data is **high-dimensional** (100+ features) — structure learning becomes slow
+- You need **time series** data (use `timegan`/`timevae`/`fflows`)
+
+---
+
 ## Method Selection Guide
 
 ### For Tabular Data
@@ -959,17 +1037,19 @@ synth = gen.generate(
 
 | Scenario | Recommended Method | Alternative |
 |----------|-------------------|-------------|
-| **Complex temporal patterns** | `timegan` | - |
+| **Complex temporal patterns** | `timegan` | `fflows` |
 | **Regular time series** | `timevae` | `timegan` |
-| **Fast training** | `timevae` | - |
-| **Multi-entity sequences** | `timegan` | `timevae` |
-| **Maximum quality** | `timegan` | `timevae` |
+| **Periodic/seasonal series** | `fflows` | `timevae` |
+| **Fast training** | `timevae` | `fflows` |
+| **Multi-entity sequences** | `timegan` | `fflows` |
+| **Maximum quality** | `timegan` | `fflows` |
 
 ### For Special Cases
 
 | Data Type | Recommended Method |
 |-----------|-------------------|
 | **Single-cell RNA-seq** | `scvi` |
+| **Clinical/Medical tabular** | `bn` or `ClinicalDataGenerator` |
 | **Clinical/Medical** | Use `ClinicalDataGenerator` |
 | **Streaming data** | Use `StreamGenerator` |
 | **Block/Batch data** | Use `RealBlockGenerator` |

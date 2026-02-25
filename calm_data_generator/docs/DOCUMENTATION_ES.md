@@ -258,6 +258,8 @@ CALM-Data-Generator ahora soporta métodos avanzados de síntesis de series temp
 |--------|------|-----------|
 | `timegan` | GAN | Patrones temporales complejos, secuencias multi-entidad |
 | `timevae` | VAE | Series temporales regulares, entrenamiento más rápido |
+| `fflows` | Normalizing Flows | Series periódicas/estacionales, más estable que TimeGAN |
+| `bn` | Red Bayesiana | Datos tabulares clínicos con dependencias causales |
 
 ### Uso Básico
 
@@ -274,12 +276,22 @@ synth = gen.generate(
     n_iter=1000
 )
 
-# TimeVAE para generación más rápida
+# FourierFlows - estable para series periódicas
 synth = gen.generate(
     datos_series_temporales,
-    method='timevae',
+    method='fflows',
     n_samples=100,
+    sequence_key='seq_id',
+    time_key='timestamp',
     n_iter=500
+)
+
+# Red Bayesiana - para datos tabulares con dependencias causales
+synth = gen.generate(
+    datos_clinicos,
+    method='bn',
+    n_samples=500,
+    target_col='diagnostico'
 )
 ```
 

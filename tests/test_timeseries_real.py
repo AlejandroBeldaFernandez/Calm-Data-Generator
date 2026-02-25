@@ -113,3 +113,59 @@ def test_timevae_parameters(time_series_data):
         pytest.skip("Synthcity not available for TimeVAE")
     except Exception as e:
         pytest.fail(f"TimeVAE parameters test failed: {e}")
+
+
+@pytest.fixture
+def fflows_data():
+    """Create large multi-sequence time series data for FourierFlows.
+
+    fflows uses internal cross-validation with n_splits=3, so it needs
+    significantly more sequences than 10 to avoid errors. We use 30 sequences
+    of 10 steps each.
+    """
+    np.random.seed(42)
+    n_sequences = 30
+    seq_len = 10
+
+    data = []
+    for i in range(n_sequences):
+        for t in range(seq_len):
+            data.append(
+                {
+                    "seq_id": i,
+                    "time": t,
+                    "feature1": np.sin(t / 3.0) + np.random.normal(0, 0.1),
+                    "feature2": np.cos(t / 3.0) + np.random.normal(0, 0.1),
+                }
+            )
+    return pd.DataFrame(data)
+
+
+def test_fflows_synthesis(fflows_data):
+    """Test FourierFlows (fflows) for time series synthesis.
+
+    fflows uses normalizing flows in the frequency domain and is typically
+    more stable than TimeGAN, especially for periodic/quasi-periodic series.
+    Requires at least ~20+ sequences to satisfy internal cross-validation.
+    """
+    from calm_data_generator.generators.tabular import RealGenerator
+
+    gen = RealGenerator(auto_report=False)
+
+    try:
+        synth = gen.generate(
+            fflows_data,
+            n_samples=10,
+            method="fflows",
+            sequence_key="seq_id",
+            time_key="time",
+            n_iter=10,
+            batch_size=16,
+        )
+        assert synth is not None
+        assert len(synth) > 0
+        print("✅ FourierFlows test passed")
+    except ImportError:
+        pytest.skip("Synthcity not available for fflows")
+    except Exception as e:
+        pytest.fail(f"FourierFlows test failed: {e}")

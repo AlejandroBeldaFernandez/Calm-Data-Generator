@@ -17,13 +17,14 @@ from calm_data_generator.generators.tabular import RealGenerator, QualityReporte
 | `lgbm` | Síntesis con LightGBM |
 | `ctgan` | CTGAN (deep learning) |
 | `tvae` | TVAE (autoencoder variacional) |
-| `bayesian` | Red Bayesiana |
+| `bn` | Red Bayesiana (estructura causal) |
 | `smote` | Sobremuestreo SMOTE |
 | `adasyn` | Muestreo adaptativo ADASYN |
 | `diffusion` | Difusión Tabular (DDPM) |
 | `ddpm` | Synthcity TabDDPM (avanzado) |
 | `timegan` | TimeGAN (series temporales) |
 | `timevae` | TimeVAE (series temporales) |
+| `fflows` | FourierFlows (series periódicas) |
 | `scvi` | scVI (Single-Cell VI) |
 
 

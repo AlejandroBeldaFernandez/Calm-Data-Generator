@@ -257,6 +257,7 @@ print(f"Generadas {len(synthetic)} muestras")
 | `ddpm` | ✅ PyTorch + Synthcity | Auto-detectado |
 | `timegan` | ✅ PyTorch + Synthcity | Auto-detectado |
 | `timevae` | ✅ PyTorch + Synthcity | Auto-detectado |
+| `fflows` | ✅ PyTorch + Synthcity | Auto-detectado |
 
 
 | `smote`, `adasyn`, `cart`, `rf`, `lgbm`, `gmm`, `copula` | ❌ Solo CPU | - |
@@ -411,6 +412,8 @@ reporter.generate_report(
 | `ddpm` | DL | Synthcity TabDDPM (avanzado) | Requiere `synthcity` |
 | `timegan` | Series Temp. | TimeGAN para datos secuenciales | Requiere `synthcity` |
 | `timevae` | Series Temp. | TimeVAE para datos secuenciales | Requiere `synthcity` |
+| `fflows` | Series Temp. | FourierFlows — flujos normalizantes en dominio de frecuencia, estable para series periódicas | Requiere `synthcity` |
+| `bn` | DL / Probabilístico | Red Bayesiana — modela dependencias causales entre variables | Requiere `synthcity` |
 | `smote` | Aumento | Sobremuestreo SMOTE | Instalación base |
 | `adasyn` | Aumento | Muestreo adaptativo ADASYN | Instalación base |
 | `copula` | Copula | Síntesis basada en Copulas | Instalación base |

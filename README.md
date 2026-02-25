@@ -273,6 +273,7 @@ print(f"Generated {len(synthetic)} samples")
 | `ddpm` | ✅ PyTorch + Synthcity | Auto-detected |
 | `timegan` | ✅ PyTorch + Synthcity | Auto-detected |
 | `timevae` | ✅ PyTorch + Synthcity | Auto-detected |
+| `fflows` | ✅ PyTorch + Synthcity | Auto-detected |
 
 
 | `smote`, `adasyn`, `cart`, `rf`, `lgbm`, `gmm`, `copula` | ❌ CPU only | - |
@@ -460,6 +461,8 @@ reporter.generate_report(
 | `ddpm` | DL | Synthcity TabDDPM (advanced) | Requires `synthcity` |
 | `timegan` | Time Series | TimeGAN for sequential data | Requires `synthcity` |
 | `timevae` | Time Series | TimeVAE for sequential data | Requires `synthcity` |
+| `fflows` | Time Series | FourierFlows — normalizing flows for temporal data, stable for periodic series | Requires `synthcity` |
+| `bn` | DL / Probabilistic | Bayesian Network — models causal dependencies between features | Requires `synthcity` |
 | `smote` | Augmentation | SMOTE oversampling | Base installation |
 | `adasyn` | Augmentation | ADASYN adaptive sampling | Base installation |
 

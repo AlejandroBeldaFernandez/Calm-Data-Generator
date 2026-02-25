@@ -52,11 +52,9 @@ class TestGEARSSynthesis:
 
         # Check dependencies first
         try:
-            import gears  # noqa: F401
+            import gears
             import torch
 
-            if torch.__version__ < "2.4.0":
-                pytest.skip(f"GEARS requires torch>=2.4.0, found {torch.__version__}")
         except ImportError:
             pytest.skip("GEARS not installed")
 
@@ -71,13 +69,13 @@ class TestGEARSSynthesis:
                 target_col="condition",
                 method="gears",
                 # Perturbations must exist in the input data logic or be valid genes
-                perturbations=["TP53+ctrl", "TNF+ctrl"],
+                perturbations=["CNN1", "CBL"],
                 epochs=1,  # Low epochs for testing speed
                 device="cpu",
             )
 
             if synthetic is None:
-                pytest.skip(
+                pytest.fail(
                     "GEARS synthesis returned None (likely missing dependencies or runtime error)"
                 )
 
@@ -88,7 +86,13 @@ class TestGEARSSynthesis:
             assert "TP53" in synthetic.columns
 
         except Exception as e:
-            if "gears" in str(e).lower() or "ImportError" in str(e):
-                pytest.skip(f"GEARS failed to load: {e}")
+            err = str(e)
+            # Perturbation not in GO graph = data compatibility issue, not a code bug
+            if "not in the perturbation graph" in err or "pert_list" in err:
+                pytest.skip(
+                    f"GEARS perturbation not in GO graph (expected with synthetic data): {e}"
+                )
+            elif "gears" in err.lower() or "ImportError" in err:
+                pytest.fail(f"GEARS failed to load: {e}")
             else:
                 raise e

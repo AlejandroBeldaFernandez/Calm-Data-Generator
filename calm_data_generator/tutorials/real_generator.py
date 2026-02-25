@@ -140,11 +140,61 @@ print("\nSMOTE class distribution:")
 print(synthetic_smote["target"].value_counts())
 
 # ============================================================
-# 6. Advanced Configuration (Drift & Reporting) - REMOVED AS REDUNDANT
+# 6. Bayesian Network (bn) - Clinical/structured tabular data
 # ============================================================
-# The advanced configuration for Drift and Reporting has been integrated
-# into the "1. Basic Usage" section to streamline the tutorial.
-# The previous section 6 content is now redundant.
-#
-# print(f"Advanced synthetic data shape: {synthetic_advanced.shape}")
-# print(f"Check 'tutorial_real_output' for the generated report.")
+
+# BN models conditional dependencies between variables using a directed
+# acyclic graph (structure learning). Ideal for clinical/epidemiological data.
+try:
+    clinical_data = pd.DataFrame(
+        {
+            "age": np.random.randint(20, 80, 100),
+            "gender": np.random.choice(["M", "F"], 100),
+            "bmi": np.random.normal(25, 5, 100),
+            "diagnosis": np.random.choice([0, 1], 100),
+        }
+    )
+    synthetic_bn = gen.generate(
+        data=clinical_data,
+        n_samples=100,
+        method="bn",
+        target_col="diagnosis",
+    )
+    print("\nBayesian Network synthetic data:", synthetic_bn.shape)
+except Exception as e:
+    print(f"BN not available: {e}")
+
+# ============================================================
+# 7. FourierFlows (fflows) - Periodic time series
+# ============================================================
+
+# fflows applies normalizing flows in the frequency domain.
+# More stable than TimeGAN, best for periodic/seasonal series.
+# Requires: sequence_key (identifies sequences), time_key (timestamps/steps).
+# Needs at least ~20 sequences to pass Synthcity's internal cross-validation.
+try:
+    n_seq, seq_len = 30, 10
+    ts_rows = []
+    for i in range(n_seq):
+        for t in range(seq_len):
+            ts_rows.append(
+                {
+                    "seq_id": i,
+                    "time": t,
+                    "feature1": np.sin(t / 3.0) + np.random.normal(0, 0.1),
+                    "feature2": np.cos(t / 3.0) + np.random.normal(0, 0.1),
+                }
+            )
+    ts_data = pd.DataFrame(ts_rows)
+
+    synthetic_fflows = gen.generate(
+        data=ts_data,
+        n_samples=10,
+        method="fflows",
+        sequence_key="seq_id",
+        time_key="time",
+        n_iter=50,
+    )
+    print("\nFourierFlows synthetic data:", synthetic_fflows.shape)
+except Exception as e:
+    print(f"FourierFlows not available: {e}")

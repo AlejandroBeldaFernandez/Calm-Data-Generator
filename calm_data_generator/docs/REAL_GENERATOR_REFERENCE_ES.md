@@ -726,6 +726,70 @@ synth = gen.generate(
 
 ---
 
+### `fflows` - FourierFlows (Flujos Normalizantes en Dominio de Frecuencia)
+
+**Tipo:** Deep Learning (Normalizing Flows para Series Temporales)  
+**Mejor para:** Series temporales periódicas/quasi-periódicas, alternativa estable a TimeGAN  
+**Requisitos:** `synthcity`
+
+#### Descripción
+
+`fflows` aplica flujos normalizantes en el dominio de la frecuencia para generar secuencias temporales. Es generalmente más estable que TimeGAN y destaca en series con patrones periódicos (sinusoidales, estacionales).
+
+```python
+synth = gen.generate(
+    data,
+    method='fflows',
+    n_samples=100,
+    sequence_key='seq_id',   # Columna que identifica cada secuencia
+    time_key='timestamp',    # Columna con marcas de tiempo
+    n_iter=1000,
+    batch_size=128,
+    lr=0.001,
+)
+```
+
+#### Comparación: `timegan` vs `timevae` vs `fflows`
+
+| Aspecto | `timegan` | `timevae` | `fflows` |
+|---------|-----------|-----------|----------|
+| **Velocidad** | 🐢 Lento | ⚡ Rápido | ⚡ Rápido |
+| **Calidad** | ⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐ |
+| **Estabilidad** | Baja | Media | Alta |
+| **Mejor para** | Patrones complejos | Series regulares | Series periódicas |
+
+---
+
+### `bn` - Red Bayesiana (Bayesian Network)
+
+**Tipo:** Modelo Gráfico Probabilístico  
+**Mejor para:** Datos tabulares clínicos/estructurados con dependencias causales entre variables  
+**Requisitos:** `synthcity`
+
+#### Descripción
+
+Una Red Bayesiana modela las dependencias condicionales entre variables usando un grafo acíclico dirigido. El aprendizaje de estructura descubre qué variables influyen causalmente en otras. Especialmente útil para datos sanitarios y clínicos.
+
+```python
+synth = gen.generate(
+    data,
+    method='bn',
+    n_samples=1000,
+    target_col='diagnostico',
+)
+```
+
+✅ **Usa `bn` cuando:**
+- Los datos tienen **relaciones causales** entre variables (ej. diagnóstico ← síntomas ← analíticas)
+- Trabajas con datos **clínicos o epidemiológicos**
+- Quieres un **modelo interpretable** (la red es inspeccionable)
+
+❌ **No uses `bn` cuando:**
+- Los datos son **alta dimensionalidad** (100+ variables) — el aprendizaje de estructura se vuelve lento
+- Necesitas datos de **series temporales** (usa `timegan`/`timevae`/`fflows`)
+
+---
+
 ## Method Selection Guide
 
 ### For Tabular Data
@@ -741,21 +805,23 @@ synth = gen.generate(
 | **Fast generation** | `cart`, `diffusion` | `rf` |
 | **Maximum quality** | `ddpm` (ResNet) | `ctgan` |
 
-### For Time Series Data
+### Para Series Temporales
 
-| Scenario | Recommended Method | Alternative |
+| Escenario | Método Recomendado | Alternativa |
 |----------|-------------------|-------------|
-| **Complex temporal patterns** | `timegan` | - |
-| **Regular time series** | `timevae` | `timegan` |
-| **Fast training** | `timevae` | - |
-| **Multi-entity sequences** | `timegan` | `timevae` |
-| **Maximum quality** | `timegan` | `timevae` |
+| **Patrones temporales complejos** | `timegan` | `fflows` |
+| **Series temporales regulares** | `timevae` | `timegan` |
+| **Series periódicas/estacionales** | `fflows` | `timevae` |
+| **Entrenamiento rápido** | `timevae` | `fflows` |
+| **Secuencias multi-entidad** | `timegan` | `fflows` |
+| **Calidad máxima** | `timegan` | `fflows` |
 
 ### For Special Cases
 
-| Data Type | Recommended Method |
+| Tipo de Dato | Método Recomendado |
 |-----------|-------------------|
-| **Single-cell RNA-seq** | `scvi` |
-| **Clinical/Medical** | Use `ClinicalDataGenerator` |
-| **Streaming data** | Use `StreamGenerator` |
-| **Block/Batch data** | Use `RealBlockGenerator` |
+| **RNA-seq single-cell** | `scvi` |
+| **Datos clínicos tabulares** | `bn` o `ClinicalDataGenerator` |
+| **Datos clínicos** | Usa `ClinicalDataGenerator` |
+| **Datos en streaming** | Usa `StreamGenerator` |
+| **Datos por bloques** | Usa `RealBlockGenerator` |

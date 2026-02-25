@@ -143,3 +143,32 @@ def test_diffusion_basic(complex_data):
         assert len(synth) == 10
     except Exception as e:
         pytest.fail(f"Diffusion generation failed: {e}")
+
+
+def test_bn_synthesis():
+    """Test Bayesian Network synthesis via Synthcity."""
+    np.random.seed(42)
+    data = pd.DataFrame(
+        {
+            "age": np.random.randint(20, 80, 100),
+            "gender": np.random.choice(["M", "F"], 100),
+            "bmi": np.random.normal(25, 5, 100),
+            "diagnosis": np.random.choice([0, 1], 100),
+        }
+    )
+    gen = RealGenerator(auto_report=False)
+    try:
+        synth = gen.generate(
+            data=data,
+            n_samples=20,
+            method="bn",
+            target_col="diagnosis",
+        )
+        assert synth is not None
+        assert len(synth) == 20
+        assert set(synth.columns) == set(data.columns)
+        print("✅ BN test passed")
+    except ImportError:
+        pytest.skip("Synthcity not available for BN")
+    except Exception as e:
+        pytest.fail(f"BN synthesis failed: {e}")
