@@ -598,13 +598,34 @@ class RealGenerator(BaseGenerator):
         self._patch_synthcity_encoder()  # Apply patch
         if "epochs" in model_kwargs:
             model_kwargs["n_iter"] = model_kwargs.pop("epochs")
+        differentiation_factor = model_kwargs.pop("differentiation_factor", 0.0)
 
         syn = self._get_synthesizer("ctgan", **model_kwargs)
         syn.fit(data)
         self.synthesizer = syn
         self.method = "ctgan"
         self.metadata = {"columns": data.columns.tolist()}
-        return syn.generate(count=n_samples).dataframe()
+        
+        synth_df = syn.generate(count=n_samples).dataframe()
+
+        if differentiation_factor > 0.0 and target_col and target_col in synth_df.columns:
+            self.logger.info(f"Applying differentiation factor {differentiation_factor} in feature space for CTGAN...")
+            numeric_cols = synth_df.select_dtypes(include=[np.number]).columns
+            unique_classes = synth_df[target_col].unique()
+            
+            if len(unique_classes) > 1 and len(numeric_cols) > 0:
+                global_centroid = synth_df[numeric_cols].mean().values
+                for c in unique_classes:
+                    mask = (synth_df[target_col] == c)
+                    if mask.sum() > 0:
+                        class_centroid = synth_df.loc[mask, numeric_cols].mean().values
+                        direction = class_centroid - global_centroid
+                        # Bulk models shrink variance heavily, so we need a much stronger push
+                        synth_df.loc[mask, numeric_cols] += (1 + differentiation_factor * 2.0) * direction
+            else:
+                self.logger.warning("differentiation_factor > 0 but no numeric columns or only 1 class found. Ignoring.")
+
+        return synth_df
 
     def _synthesize_tvae(
         self,
@@ -619,13 +640,62 @@ class RealGenerator(BaseGenerator):
         self._patch_synthcity_encoder()  # Apply patch
         if "epochs" in model_kwargs:
             model_kwargs["n_iter"] = model_kwargs.pop("epochs")
+        differentiation_factor = model_kwargs.pop("differentiation_factor", 0.0)
 
         syn = self._get_synthesizer("tvae", **model_kwargs)
         syn.fit(data)
         self.synthesizer = syn
         self.method = "tvae"
         self.metadata = {"columns": data.columns.tolist()}
-        return syn.generate(count=n_samples).dataframe()
+
+        synth_df = syn.generate(count=n_samples).dataframe()
+
+        if differentiation_factor > 0.0 and target_col and target_col in synth_df.columns:
+            self.logger.info(f"Applying differentiation factor {differentiation_factor} in feature space for TVAE...")
+            numeric_cols = synth_df.select_dtypes(include=[np.number]).columns
+            unique_classes = synth_df[target_col].unique()
+            
+            if len(unique_classes) > 1 and len(numeric_cols) > 0:
+                global_centroid = synth_df[numeric_cols].mean().values
+                
+                # Get original min/max for clipping to maintain similarity
+                orig_stats = {}
+                for c in unique_classes:
+                    orig_mask = (data[target_col] == c) if target_col in data.columns else None
+                    if orig_mask is not None and orig_mask.sum() > 0:
+                        class_data = data.loc[orig_mask, numeric_cols]
+                        orig_stats[c] = {
+                            'min': class_data.min().values,
+                            'max': class_data.max().values
+                        }
+
+                for c in unique_classes:
+                    mask = (synth_df[target_col] == c)
+                    if mask.sum() > 0:
+                        class_centroid = synth_df.loc[mask, numeric_cols].mean().values
+                        direction = class_centroid - global_centroid
+                        
+                        # Apply stronger differentiation
+                        synth_df.loc[mask, numeric_cols] += (1 + differentiation_factor * 2.0) * direction
+                        
+                        # Clip to maintain similarity
+                        if c in orig_stats:
+                            # Allow 10% margin
+                            margin = (orig_stats[c]['max'] - orig_stats[c]['min']) * 0.1
+                            c_min = orig_stats[c]['min'] - margin
+                            c_max = orig_stats[c]['max'] + margin
+                            
+                            # Clip values to realistic bounds
+                            for i, col in enumerate(numeric_cols):
+                                synth_df.loc[mask, col] = np.clip(
+                                    synth_df.loc[mask, col], 
+                                    a_min=c_min[i], 
+                                    a_max=c_max[i]
+                                )
+            else:
+                self.logger.warning("differentiation_factor > 0 but no numeric columns or only 1 class found. Ignoring.")
+
+        return synth_df
 
     def _synthesize_bn(
         self,
@@ -1679,37 +1749,102 @@ class RealGenerator(BaseGenerator):
         model.train(max_epochs=epochs, train_size=0.9, early_stopping=True)
         model.module.eval()  # Ensure model is in eval mode for generation
 
-        # Generate synthetic samples by sampling from prior
+        # Decide generation strategy based on new parameters
+        use_latent_sampling = kwargs.get("use_latent_sampling", True)
+        differentiation_factor = kwargs.get("differentiation_factor", 0.0)
+        latent_noise_std = kwargs.get("latent_noise_std", 0.1)
+
+        import torch
+
         self.logger.info(f"Generating {n_samples} synthetic samples...")
 
-        # Sample latent codes from prior (standard normal)
-        latent_samples = np.random.randn(n_samples, n_latent).astype(np.float32)
+        if use_latent_sampling:
+            self.logger.info("Using latent sampling for more realistic generation...")
+            orig_latent = model.get_latent_representation()
+            
+            indices = np.random.choice(len(orig_latent), size=n_samples, replace=True)
+            latent_samples = orig_latent[indices].astype(np.float32)
+            
+            synthetic_metadata = None
+            if target_col and target_col in (
+                data.obs.columns if hasattr(data, "obs") else data.columns
+            ):
+                source_metadata = (
+                    data.obs[target_col].values
+                    if hasattr(data, "obs")
+                    else data[target_col].values
+                )
+                synthetic_metadata = source_metadata[indices]
 
-        # Decode latent codes to get synthetic expression
-        # We'll use the generative outputs
-        import torch
+                # --- Differentiation logic ---
+                if differentiation_factor > 0.0:
+                    self.logger.info(f"Applying differentiation factor {differentiation_factor} in latent space...")
+                    unique_classes = np.unique(synthetic_metadata)
+                    
+                    if len(unique_classes) > 1:
+                        global_centroid = np.mean(latent_samples, axis=0)
+                        
+                        for c in unique_classes:
+                            mask = (synthetic_metadata == c)
+                            if np.sum(mask) > 0:
+                                class_centroid = np.mean(latent_samples[mask], axis=0)
+                                direction = class_centroid - global_centroid
+                                
+                                # Apply stronger differentiation
+                                shift = (1 + differentiation_factor * 2.0) * direction
+                                
+                                # Clamp shift to prevent wild decodings (inf values)
+                                # The latent space is typically standard normal N(0,1), so shifts > 2-3 standard deviations can be out-of-distribution.
+                                # However, to achieve strong differentiation as requested by the user, we relax this clamp to 5.0
+                                max_shift = 5.0
+                                shift_norm = np.linalg.norm(shift, axis=-1, keepdims=True)
+                                # Avoid division by zero
+                                shift_norm = np.where(shift_norm == 0, 1.0, shift_norm)
+                                
+                                # Scale down shift if it exceeds max_shift length
+                                shift = np.where(shift_norm > max_shift, shift * (max_shift / shift_norm), shift)
+                                
+                                latent_samples[mask] += shift
+                    else:
+                        self.logger.warning("differentiation_factor > 0 but only 1 class found. Ignoring.")
+            
+            latent_samples += np.random.randn(*latent_samples.shape).astype(np.float32) * latent_noise_std
+        else:
+            self.logger.info("Using standard prior sampling (random normal).")
+            latent_samples = np.random.randn(n_samples, n_latent).astype(np.float32)
+            synthetic_metadata = None
 
         with torch.no_grad():
             latent_tensor = torch.tensor(latent_samples).to(model.device)
-            # Get library size from training data
-            # Use adata_to_train to ensure consistency
-            mean_lib_size = adata_to_train.X.sum(axis=1).mean()
-            log_library_size = np.log(mean_lib_size + 1e-8)
-            self.logger.debug(
-                f"scVI Mean library size: {mean_lib_size}, log: {log_library_size}"
-            )
+            
+            if use_latent_sampling and kwargs.get('preserve_library_size', True):
+                if hasattr(adata_to_train.X, 'toarray'):
+                    orig_lib_size = np.sum(adata_to_train.X.toarray(), axis=1)
+                else:
+                    orig_lib_size = np.sum(adata_to_train.X, axis=1)
+                if hasattr(orig_lib_size, 'A1'):
+                     orig_lib_size = orig_lib_size.A1
+                
+                orig_log_lib = np.log(orig_lib_size + 1e-8)
+                sampled_log_lib = orig_log_lib[indices]
+                library_tensor = torch.tensor(
+                    sampled_log_lib, dtype=torch.float32
+                ).unsqueeze(1).to(model.device)
+            else:
+                mean_lib_size = adata_to_train.X.sum(axis=1).mean()
+                log_library_size = np.log(mean_lib_size + 1e-8)
+                self.logger.debug(
+                    f"scVI Mean library size: {mean_lib_size}, log: {log_library_size}"
+                )
+                library_tensor = torch.full(
+                    (n_samples, 1), log_library_size, dtype=torch.float32
+                ).to(model.device)
 
-            library_tensor = torch.full(
-                (n_samples, 1), log_library_size, dtype=torch.float32
-            ).to(model.device)
-
-            # Generate from decoder
+            batch_index = torch.zeros(n_samples, 1, dtype=torch.long).to(model.device)
             generative_outputs = model.module.generative(
                 z=latent_tensor,
                 library=library_tensor,
-                batch_index=torch.zeros(n_samples, 1, dtype=torch.long).to(
-                    model.device
-                ),
+                batch_index=batch_index,
             )
 
             # Sample from the distribution
@@ -1754,15 +1889,18 @@ class RealGenerator(BaseGenerator):
         if target_col and target_col in (
             data.obs.columns if hasattr(data, "obs") else data.columns
         ):
-            # metadata_cols might be empty if adata was passed
-            source_metadata = (
-                data.obs[target_col].values
-                if hasattr(data, "obs")
-                else data[target_col].values
-            )
-            synth_df[target_col] = np.random.choice(
-                source_metadata, size=n_samples, replace=True
-            )
+            if 'synthetic_metadata' in locals() and synthetic_metadata is not None:
+                synth_df[target_col] = synthetic_metadata
+            else:
+                # metadata_cols might be empty if adata was passed
+                source_metadata = (
+                    data.obs[target_col].values
+                    if hasattr(data, "obs")
+                    else data[target_col].values
+                )
+                synth_df[target_col] = np.random.choice(
+                    source_metadata, size=n_samples, replace=True
+                )
 
         self.logger.info(f"scVI synthesis complete. Generated {len(synth_df)} samples.")
         return synth_df

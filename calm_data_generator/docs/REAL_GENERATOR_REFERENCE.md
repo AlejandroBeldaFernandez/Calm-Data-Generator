@@ -345,12 +345,10 @@ synthetic = gen.generate(
     data=adata,              # Pass AnnData directly
     n_samples=1000,
     method="scvi",
-    target_col="cell_type",  # Must be in adata.obs
-    model_params={
-        "epochs": 100,
-        "n_latent": 10,
-        "n_layers": 1,
-    }
+    target_col="cell_type", 
+    epochs: 100,
+    n_latent: 10,
+    n_layers: 1,
 )
 # Returns pd.DataFrame with gene columns + metadata
 ```
