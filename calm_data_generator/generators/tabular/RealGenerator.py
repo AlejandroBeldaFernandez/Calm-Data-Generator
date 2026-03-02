@@ -585,6 +585,139 @@ class RealGenerator(BaseGenerator):
         except ImportError:
             pass  # Synthcity not installed or structure changed
 
+    def _synthesize_split_by_class(
+        self,
+        data: pd.DataFrame,
+        n_samples: int,
+        target_col: str,
+        synthcity_plugin: str,
+        **model_kwargs,
+    ) -> pd.DataFrame:
+        """Trains a separate model per class and merges the results proportionally.
+
+        This is the most reliable way to generate data where classes are clearly
+        separable (high ARI). Each model sees only its own class, so the generated
+        data is realistic and stays within each class's distribution.
+
+        The number of generated samples per class is proportional to the original
+        class counts, so the class balance is preserved.
+
+        Args:
+            data: Input DataFrame with a `target_col` column.
+            n_samples: Total number of synthetic samples to generate.
+            target_col: Column name for class labels.
+            synthcity_plugin: Name of the Synthcity plugin to use ('ctgan' or 'tvae').
+            **model_kwargs: Additional parameters passed to the Synthcity plugin.
+
+        Returns:
+            A DataFrame of synthetic data with all classes merged.
+        """
+        self.logger.info(
+            f"Split-by-class mode: training one {synthcity_plugin.upper()} per class..."
+        )
+        class_counts = data[target_col].value_counts()
+        total_original = len(data)
+        
+        dfs = []
+        for cls, count in class_counts.items():
+            # Proportional sample count for this class
+            n_cls = max(1, int(round(n_samples * count / total_original)))
+            
+            self.logger.info(
+                f"  Training model for class '{cls}' ({count} orig. samples, "
+                f"generating {n_cls} synthetic)..."
+            )
+            subset = data[data[target_col] == cls].drop(columns=[target_col])
+            
+            syn = self._get_synthesizer(synthcity_plugin, **model_kwargs)
+            syn.fit(subset)
+            
+            synth = syn.generate(count=n_cls).dataframe()
+            synth[target_col] = cls
+            dfs.append(synth)
+        
+        result = pd.concat(dfs, ignore_index=True)
+        self.logger.info(
+            f"Split-by-class complete. Generated {len(result)} samples across "
+            f"{len(class_counts)} classes."
+        )
+        return result
+
+    def _apply_centroid_matching(
+        self,
+        synth_df: pd.DataFrame,
+        original_data: pd.DataFrame,
+        target_col: str,
+    ) -> pd.DataFrame:
+        """Adjusts synthetic data to match the original's inter- and intra-class structure.
+
+        After split_by_class generation, this method:
+          1. Shifts each class centroid to match the original's centroid offset.
+          2. Rescales within-class deviations to match the original per-feature std,
+             so that the within-class spread is also realistic.
+
+        Together these two steps reproduce the same level of class separability (ARI)
+        as the original dataset.
+
+        Args:
+            synth_df: Synthetic DataFrame from split_by_class.
+            original_data: Original training DataFrame.
+            target_col: Column name for class labels.
+
+        Returns:
+            DataFrame with centroid and variance matched to the original.
+        """
+        self.logger.info("Applying centroid + variance matching to produce faithful separation...")
+
+        numeric_cols = synth_df.select_dtypes(include=[np.number]).columns.tolist()
+        numeric_cols = [c for c in numeric_cols if c != target_col]
+
+        if len(numeric_cols) == 0:
+            self.logger.warning("No numeric columns for centroid matching. Skipping.")
+            return synth_df
+
+        unique_classes = synth_df[target_col].unique()
+
+        # Pre-compute original global centroid and per-class stats
+        orig_global_centroid = original_data[numeric_cols].mean().values
+        orig_class_stats = {}
+        for c in unique_classes:
+            orig_mask = (original_data[target_col] == c)
+            if orig_mask.sum() > 1:
+                class_data = original_data.loc[orig_mask, numeric_cols]
+                orig_class_stats[c] = {
+                    "centroid_offset": class_data.mean().values - orig_global_centroid,
+                    "std": class_data.std().values + 1e-8,  # per-feature std
+                }
+
+        synth_global_centroid = synth_df[numeric_cols].mean().values
+        result_df = synth_df.copy()
+
+        for c in unique_classes:
+            mask = (result_df[target_col] == c)
+            if mask.sum() == 0 or c not in orig_class_stats:
+                continue
+
+            stats = orig_class_stats[c]
+            synth_class_centroid = result_df.loc[mask, numeric_cols].mean().values
+
+            # 1. Compute within-class deviations from their centroid
+            deviations = result_df.loc[mask, numeric_cols].values - synth_class_centroid  # (n, d)
+
+            # 2. Rescale deviations to match original within-class std
+            synth_std = np.std(deviations, axis=0) + 1e-8
+            scale = stats["std"] / synth_std  # (d,) per-feature scale
+            scaled_deviations = deviations * scale  # (n, d)
+
+            # 3. Place class centroid at original offset from global centroid
+            target_centroid = synth_global_centroid + stats["centroid_offset"]
+
+            # 4. Reconstruct: target_centroid + rescaled deviations
+            result_df.loc[mask, numeric_cols] = target_centroid + scaled_deviations
+
+        self.logger.info("Centroid + variance matching complete.")
+        return result_df
+
     def _synthesize_ctgan(
         self,
         data: pd.DataFrame,
@@ -599,6 +732,23 @@ class RealGenerator(BaseGenerator):
         if "epochs" in model_kwargs:
             model_kwargs["n_iter"] = model_kwargs.pop("epochs")
         differentiation_factor = model_kwargs.pop("differentiation_factor", 0.0)
+        split_by_class = model_kwargs.pop("split_by_class", False)
+        match_original_separation = model_kwargs.pop("match_original_separation", False)
+
+        # split_by_class: train one model per class and merge proportionally.
+        # Guarantees realistic and maximally-separable data.
+        if split_by_class and target_col and target_col in data.columns:
+            self.method = "ctgan"
+            self.metadata = {"columns": data.columns.tolist()}
+            synth_df = self._synthesize_split_by_class(
+                data=data, n_samples=n_samples, target_col=target_col,
+                synthcity_plugin="ctgan", **model_kwargs
+            )
+            if match_original_separation:
+                synth_df = self._apply_centroid_matching(
+                    synth_df=synth_df, original_data=data, target_col=target_col
+                )
+            return synth_df
 
         syn = self._get_synthesizer("ctgan", **model_kwargs)
         syn.fit(data)
@@ -620,7 +770,6 @@ class RealGenerator(BaseGenerator):
                     if mask.sum() > 0:
                         class_centroid = synth_df.loc[mask, numeric_cols].mean().values
                         direction = class_centroid - global_centroid
-                        # Bulk models shrink variance heavily, so we need a much stronger push
                         synth_df.loc[mask, numeric_cols] += (1 + differentiation_factor * 2.0) * direction
             else:
                 self.logger.warning("differentiation_factor > 0 but no numeric columns or only 1 class found. Ignoring.")
@@ -641,6 +790,23 @@ class RealGenerator(BaseGenerator):
         if "epochs" in model_kwargs:
             model_kwargs["n_iter"] = model_kwargs.pop("epochs")
         differentiation_factor = model_kwargs.pop("differentiation_factor", 0.0)
+        split_by_class = model_kwargs.pop("split_by_class", False)
+        match_original_separation = model_kwargs.pop("match_original_separation", False)
+
+        # split_by_class: train one model per class and merge proportionally.
+        if split_by_class and target_col and target_col in data.columns:
+            self.method = "tvae"
+            self.metadata = {"columns": data.columns.tolist()}
+            synth_df = self._synthesize_split_by_class(
+                data=data, n_samples=n_samples, target_col=target_col,
+                synthcity_plugin="tvae", **model_kwargs
+            )
+            if match_original_separation:
+                synth_df = self._apply_centroid_matching(
+                    synth_df=synth_df, original_data=data, target_col=target_col
+                )
+            return synth_df
+
 
         syn = self._get_synthesizer("tvae", **model_kwargs)
         syn.fit(data)
@@ -657,45 +823,17 @@ class RealGenerator(BaseGenerator):
             
             if len(unique_classes) > 1 and len(numeric_cols) > 0:
                 global_centroid = synth_df[numeric_cols].mean().values
-                
-                # Get original min/max for clipping to maintain similarity
-                orig_stats = {}
-                for c in unique_classes:
-                    orig_mask = (data[target_col] == c) if target_col in data.columns else None
-                    if orig_mask is not None and orig_mask.sum() > 0:
-                        class_data = data.loc[orig_mask, numeric_cols]
-                        orig_stats[c] = {
-                            'min': class_data.min().values,
-                            'max': class_data.max().values
-                        }
-
                 for c in unique_classes:
                     mask = (synth_df[target_col] == c)
                     if mask.sum() > 0:
                         class_centroid = synth_df.loc[mask, numeric_cols].mean().values
                         direction = class_centroid - global_centroid
-                        
-                        # Apply stronger differentiation
                         synth_df.loc[mask, numeric_cols] += (1 + differentiation_factor * 2.0) * direction
-                        
-                        # Clip to maintain similarity
-                        if c in orig_stats:
-                            # Allow 10% margin
-                            margin = (orig_stats[c]['max'] - orig_stats[c]['min']) * 0.1
-                            c_min = orig_stats[c]['min'] - margin
-                            c_max = orig_stats[c]['max'] + margin
-                            
-                            # Clip values to realistic bounds
-                            for i, col in enumerate(numeric_cols):
-                                synth_df.loc[mask, col] = np.clip(
-                                    synth_df.loc[mask, col], 
-                                    a_min=c_min[i], 
-                                    a_max=c_max[i]
-                                )
             else:
                 self.logger.warning("differentiation_factor > 0 but no numeric columns or only 1 class found. Ignoring.")
 
         return synth_df
+
 
     def _synthesize_bn(
         self,
@@ -1852,24 +1990,16 @@ class RealGenerator(BaseGenerator):
             # We sample from it to get synthetic counts
             px_dist = generative_outputs["px"]
 
-            # Use sample() to get synthetic counts preserving noise
-            # or mean for denoised expression. Sampling is better for synthetic data generation.
+            # Always use mean decoding.
+            # For faithful data (diff=0): mean gives denoised expression that mirrors original structure.
+            # For differentiated data (diff>0): mean preserves the latent-space shift signal cleanly.
+            # Stochastic sampling via px_dist.sample() washes out both signals with NegBinom noise.
             try:
+                synthetic_expression = px_dist.mean
+            except Exception:
                 if hasattr(px_dist, "sample"):
                     synthetic_expression = px_dist.sample()
-                elif isinstance(px_dist, torch.Tensor):
-                    # Fallback if it returns a tensor directly (e.g. some other likelihoods)
-                    synthetic_expression = px_dist
                 else:
-                    # Last resort, try to get mean
-                    synthetic_expression = px_dist.mean
-            except Exception:
-                # Fallback to mean if sampling fails (e.g. unstable parameters from low training)
-                try:
-                    synthetic_expression = px_dist.mean
-                except Exception:
-                    # Absolute fallback if mean also fails: return zeros or latent projection
-                    # (This happens if model is completely untrained/unstable)
                     synthetic_expression = torch.zeros(
                         (n_samples, adata.n_vars), dtype=torch.float32
                     )

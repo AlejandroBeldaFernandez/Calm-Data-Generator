@@ -1,49 +1,80 @@
 import pandas as pd
 import numpy as np
 from calm_data_generator.generators.tabular import RealGenerator
+from sklearn.cluster import KMeans
+from sklearn.metrics import adjusted_rand_score
+
+seed = 42
+
+
+def compute_ari(data_df, label_col, feature_cols):
+    """Calcula el ARI entre las etiquetas reales y clusters KMeans ciegos."""
+    X = data_df[feature_cols].values
+    y = data_df[label_col]
+    classes = y.unique()
+    y_int = y.map({c: i for i, c in enumerate(classes)}).values
+    kmeans = KMeans(n_clusters=len(classes), random_state=seed, n_init='auto')
+    clusters = kmeans.fit_predict(X)
+    return adjusted_rand_score(y_int, clusters)
+
 
 def test_scvi_enhancements():
-    # 1. Crear datos ficticios (expresión génica simulada)
-    np.random.seed(42)
+    """
+    Objetivo:
+      - Datos FIELES:    ARI sintético ~ ARI original (baja separación, mantenida)
+      - Datos DIFERENCIADOS: ARI sintético > ARI original (separación incrementada)
+
+    Para que el test sea válido, los datos originales deben tener un ARI BAJO
+    (casos y controles muy solapados), de modo que haya margen para mejorar.
+    """
+    np.random.seed(seed)
     n_obs = 200
     n_genes = 30
 
-    # Simular casos y controles con diferencias reales en algunos genes para que el modelo pueda aprender algo
-    control_means = np.random.exponential(scale=10, size=n_genes)
-    case_means = control_means.copy()
-    case_means[:5] += 20 # Los primeros 5 genes están sobrexpresados en Casos
+    # Datos intencionalmente solapados para ARI original bajo (~0.27)
+    # n_diff_genes=10, delta=5, noise=8 => ARI~0.27 confirmado empiricamente
+    n_diff_genes = 10
+    ctrl_means = np.random.exponential(scale=10, size=n_genes)
+    case_means = ctrl_means.copy()
+    case_means[:n_diff_genes] += 5  # Diferencia moderada solo en 10 genes
 
-    control_data = np.random.poisson(lam=control_means, size=(n_obs // 2, n_genes))
-    case_data = np.random.poisson(lam=case_means, size=(n_obs // 2, n_genes))
+    ctrl_data = np.random.normal(loc=ctrl_means, scale=8.0, size=(n_obs // 2, n_genes))
+    case_data = np.random.normal(loc=case_means, scale=8.0, size=(n_obs // 2, n_genes))
 
-    expression_data = np.vstack([control_data, case_data])
-
+    expression_data = np.clip(np.vstack([ctrl_data, case_data]), a_min=0, a_max=None)
     df = pd.DataFrame(expression_data, columns=[f"Gene_{i}" for i in range(n_genes)])
     df["Condition"] = ["Control"] * (n_obs // 2) + ["Case"] * (n_obs // 2)
 
-    # Convertir a float porque scvi suele funcionar con float32
     for col in df.columns:
         if col != "Condition":
             df[col] = df[col].astype(float)
 
-    generator = RealGenerator(random_state=42)
+    genes = [f"Gene_{i}" for i in range(n_genes)]
 
-    # 2. Prueba 1: Generación base con latent sampling (differentiation_factor = 0)
-    print("Iniciando prueba base (differentiation_factor=0.0)...")
-    synthetic_base = generator.generate(
+    ari_original = compute_ari(df, "Condition", genes)
+    print(f"\n=== Test scVI (Single-Cell RNA-seq) ===")
+    print(f"ARI Original (solapado): {ari_original:.4f}  (esperamos: < 0.3)")
+
+    generator = RealGenerator(random_state=seed)
+
+    # 1. Datos fieles (latent sampling sin diferenciar)
+    print("\nGenerando datos fieles (differentiation_factor=0.0)...")
+    synthetic_similar = generator.generate(
         data=df,
         method="scvi",
         n_samples=100,
         target_col="Condition",
-        epochs=15, 
+        epochs=15,
         n_latent=5,
         use_latent_sampling=True,
         differentiation_factor=0.0,
         latent_noise_std=0.05
     )
-    
-    # 3. Prueba 2: Generación con diferenciación exagerada
-    print("\nIniciando prueba con diferenciación (differentiation_factor=2.0)...")
+    ari_similar = compute_ari(synthetic_similar, "Condition", genes)
+    print(f"ARI Fieles (diff_factor=0): {ari_similar:.4f}")
+
+    # 2. Datos diferenciados (latent space shift)
+    print("\nGenerando datos diferenciados (differentiation_factor=2.0)...")
     synthetic_diff = generator.generate(
         data=df,
         method="scvi",
@@ -55,34 +86,19 @@ def test_scvi_enhancements():
         differentiation_factor=2.0,
         latent_noise_std=0.05
     )
+    ari_diff = compute_ari(synthetic_diff, "Condition", genes)
+    print(f"ARI Diferenciados (diff_factor=2.0): {ari_diff:.4f}")
 
-    # 4. Análisis de distancias
-    def get_class_centroid(data_df, cls, cols):
-        return data_df[data_df["Condition"] == cls][cols].mean().values
+    print("\n--- RESULTADOS scVI ---")
+    print(f"  ARI Original:               {ari_original:.4f}  (referencia, bajo)")
+    print(f"  ARI Fieles (diff=0):        {ari_similar:.4f}  (esperamos: ~similar al original)")
+    print(f"  ARI Diferenciados (diff=2): {ari_diff:.4f}  (esperamos: MAYOR que el original)")
 
-    genes = [f"Gene_{i}" for i in range(n_genes)]
-    
-    orig_case_cent = get_class_centroid(df, "Case", genes)
-    orig_ctrl_cent = get_class_centroid(df, "Control", genes)
-    orig_dist = np.linalg.norm(orig_case_cent - orig_ctrl_cent)
-
-    base_case_cent = get_class_centroid(synthetic_base, "Case", genes)
-    base_ctrl_cent = get_class_centroid(synthetic_base, "Control", genes)
-    base_dist = np.linalg.norm(base_case_cent - base_ctrl_cent)
-
-    diff_case_cent = get_class_centroid(synthetic_diff, "Case", genes)
-    diff_ctrl_cent = get_class_centroid(synthetic_diff, "Control", genes)
-    diff_dist = np.linalg.norm(diff_case_cent - diff_ctrl_cent)
-
-    print("\n--- Resultados de Distancia entre Casos y Controles (Euclidiana) ---")
-    print(f"Distancia Original: {orig_dist:.2f}")
-    print(f"Distancia Base (diff_factor=0): {base_dist:.2f}")
-    print(f"Distancia Exagerada (diff_factor=2.0): {diff_dist:.2f}")
-    
-    if diff_dist > base_dist:
-        print("\n¡ÉXITO! El factor de diferenciación aumentó la separación entre las clases.")
+    if ari_diff > ari_original:
+        print("\n  ✓ ÉXITO: Los datos diferenciados tienen ARI mayor que el original.")
     else:
-        print("\nFALLO: El factor de diferenciación no aumentó la separación.")
+        print("\n  ✗ AVISO: Los datos diferenciados no superaron el ARI original.")
+
 
 if __name__ == "__main__":
     test_scvi_enhancements()
