@@ -643,80 +643,7 @@ class RealGenerator(BaseGenerator):
         )
         return result
 
-    def _apply_centroid_matching(
-        self,
-        synth_df: pd.DataFrame,
-        original_data: pd.DataFrame,
-        target_col: str,
-    ) -> pd.DataFrame:
-        """Adjusts synthetic data to match the original's inter- and intra-class structure.
-
-        After split_by_class generation, this method:
-          1. Shifts each class centroid to match the original's centroid offset.
-          2. Rescales within-class deviations to match the original per-feature std,
-             so that the within-class spread is also realistic.
-
-        Together these two steps reproduce the same level of class separability (ARI)
-        as the original dataset.
-
-        Args:
-            synth_df: Synthetic DataFrame from split_by_class.
-            original_data: Original training DataFrame.
-            target_col: Column name for class labels.
-
-        Returns:
-            DataFrame with centroid and variance matched to the original.
-        """
-        self.logger.info("Applying centroid + variance matching to produce faithful separation...")
-
-        numeric_cols = synth_df.select_dtypes(include=[np.number]).columns.tolist()
-        numeric_cols = [c for c in numeric_cols if c != target_col]
-
-        if len(numeric_cols) == 0:
-            self.logger.warning("No numeric columns for centroid matching. Skipping.")
-            return synth_df
-
-        unique_classes = synth_df[target_col].unique()
-
-        # Pre-compute original global centroid and per-class stats
-        orig_global_centroid = original_data[numeric_cols].mean().values
-        orig_class_stats = {}
-        for c in unique_classes:
-            orig_mask = (original_data[target_col] == c)
-            if orig_mask.sum() > 1:
-                class_data = original_data.loc[orig_mask, numeric_cols]
-                orig_class_stats[c] = {
-                    "centroid_offset": class_data.mean().values - orig_global_centroid,
-                    "std": class_data.std().values + 1e-8,  # per-feature std
-                }
-
-        synth_global_centroid = synth_df[numeric_cols].mean().values
-        result_df = synth_df.copy()
-
-        for c in unique_classes:
-            mask = (result_df[target_col] == c)
-            if mask.sum() == 0 or c not in orig_class_stats:
-                continue
-
-            stats = orig_class_stats[c]
-            synth_class_centroid = result_df.loc[mask, numeric_cols].mean().values
-
-            # 1. Compute within-class deviations from their centroid
-            deviations = result_df.loc[mask, numeric_cols].values - synth_class_centroid  # (n, d)
-
-            # 2. Rescale deviations to match original within-class std
-            synth_std = np.std(deviations, axis=0) + 1e-8
-            scale = stats["std"] / synth_std  # (d,) per-feature scale
-            scaled_deviations = deviations * scale  # (n, d)
-
-            # 3. Place class centroid at original offset from global centroid
-            target_centroid = synth_global_centroid + stats["centroid_offset"]
-
-            # 4. Reconstruct: target_centroid + rescaled deviations
-            result_df.loc[mask, numeric_cols] = target_centroid + scaled_deviations
-
-        self.logger.info("Centroid + variance matching complete.")
-        return result_df
+    
 
     def _synthesize_ctgan(
         self,
@@ -732,22 +659,12 @@ class RealGenerator(BaseGenerator):
         if "epochs" in model_kwargs:
             model_kwargs["n_iter"] = model_kwargs.pop("epochs")
         differentiation_factor = model_kwargs.pop("differentiation_factor", 0.0)
-        split_by_class = model_kwargs.pop("split_by_class", False)
-        match_original_separation = model_kwargs.pop("match_original_separation", False)
+     
 
-        # split_by_class: train one model per class and merge proportionally.
-        # Guarantees realistic and maximally-separable data.
-        if split_by_class and target_col and target_col in data.columns:
-            self.method = "ctgan"
-            self.metadata = {"columns": data.columns.tolist()}
-            synth_df = self._synthesize_split_by_class(
-                data=data, n_samples=n_samples, target_col=target_col,
-                synthcity_plugin="ctgan", **model_kwargs
+        if differentiation_factor > 0.0:
+            synth_df = self._apply_differentiation_factor(
+                synth_df=synth_df, original_data=data, target_col=target_col, differentiation_factor=differentiation_factor
             )
-            if match_original_separation:
-                synth_df = self._apply_centroid_matching(
-                    synth_df=synth_df, original_data=data, target_col=target_col
-                )
             return synth_df
 
         syn = self._get_synthesizer("ctgan", **model_kwargs)
@@ -759,20 +676,9 @@ class RealGenerator(BaseGenerator):
         synth_df = syn.generate(count=n_samples).dataframe()
 
         if differentiation_factor > 0.0 and target_col and target_col in synth_df.columns:
-            self.logger.info(f"Applying differentiation factor {differentiation_factor} in feature space for CTGAN...")
-            numeric_cols = synth_df.select_dtypes(include=[np.number]).columns
-            unique_classes = synth_df[target_col].unique()
-            
-            if len(unique_classes) > 1 and len(numeric_cols) > 0:
-                global_centroid = synth_df[numeric_cols].mean().values
-                for c in unique_classes:
-                    mask = (synth_df[target_col] == c)
-                    if mask.sum() > 0:
-                        class_centroid = synth_df.loc[mask, numeric_cols].mean().values
-                        direction = class_centroid - global_centroid
-                        synth_df.loc[mask, numeric_cols] += (1 + differentiation_factor * 2.0) * direction
-            else:
-                self.logger.warning("differentiation_factor > 0 but no numeric columns or only 1 class found. Ignoring.")
+            synth_df = self._apply_differentiation_factor(
+                synth_df=synth_df, original_data=data, target_col=target_col, differentiation_factor=differentiation_factor
+            )
 
         return synth_df
 
@@ -790,21 +696,11 @@ class RealGenerator(BaseGenerator):
         if "epochs" in model_kwargs:
             model_kwargs["n_iter"] = model_kwargs.pop("epochs")
         differentiation_factor = model_kwargs.pop("differentiation_factor", 0.0)
-        split_by_class = model_kwargs.pop("split_by_class", False)
-        match_original_separation = model_kwargs.pop("match_original_separation", False)
-
-        # split_by_class: train one model per class and merge proportionally.
-        if split_by_class and target_col and target_col in data.columns:
-            self.method = "tvae"
-            self.metadata = {"columns": data.columns.tolist()}
-            synth_df = self._synthesize_split_by_class(
-                data=data, n_samples=n_samples, target_col=target_col,
-                synthcity_plugin="tvae", **model_kwargs
+       
+        if differentiation_factor > 0.0:
+            synth_df = self._apply_differentiation_factor(
+                synth_df=synth_df, original_data=data, target_col=target_col, differentiation_factor=differentiation_factor
             )
-            if match_original_separation:
-                synth_df = self._apply_centroid_matching(
-                    synth_df=synth_df, original_data=data, target_col=target_col
-                )
             return synth_df
 
 
@@ -817,21 +713,47 @@ class RealGenerator(BaseGenerator):
         synth_df = syn.generate(count=n_samples).dataframe()
 
         if differentiation_factor > 0.0 and target_col and target_col in synth_df.columns:
-            self.logger.info(f"Applying differentiation factor {differentiation_factor} in feature space for TVAE...")
-            numeric_cols = synth_df.select_dtypes(include=[np.number]).columns
-            unique_classes = synth_df[target_col].unique()
-            
-            if len(unique_classes) > 1 and len(numeric_cols) > 0:
-                global_centroid = synth_df[numeric_cols].mean().values
-                for c in unique_classes:
-                    mask = (synth_df[target_col] == c)
-                    if mask.sum() > 0:
-                        class_centroid = synth_df.loc[mask, numeric_cols].mean().values
-                        direction = class_centroid - global_centroid
-                        synth_df.loc[mask, numeric_cols] += (1 + differentiation_factor * 2.0) * direction
-            else:
-                self.logger.warning("differentiation_factor > 0 but no numeric columns or only 1 class found. Ignoring.")
+            synth_df = self._apply_differentiation_factor(
+                synth_df=synth_df, original_data=data, target_col=target_col, differentiation_factor=differentiation_factor
+            )
 
+            return synth_df
+
+    def _apply_differentiation_factor(
+        self,
+        synth_df: pd.DataFrame,
+        original_data: pd.DataFrame,
+        target_col: str,
+        differentiation_factor: float
+    ) -> pd.DataFrame:
+        """Applies a multiplicative shift to class centroids to increase separability, and clips to original range."""
+        self.logger.info(f"Applying differentiation factor {differentiation_factor} in feature space...")
+        numeric_cols = synth_df.select_dtypes(include=[np.number]).columns
+        unique_classes = synth_df[target_col].unique()
+        
+        if len(unique_classes) > 1 and len(numeric_cols) > 0:
+            global_centroid = synth_df[numeric_cols].mean().values
+            for c in unique_classes:
+                mask = (synth_df[target_col] == c)
+                if mask.sum() > 0:
+                    class_centroid = synth_df.loc[mask, numeric_cols].mean().values
+                    # A less aggressive formula: shift = factor * direction 
+                    direction = class_centroid - global_centroid
+                    synth_df.loc[mask, numeric_cols] += differentiation_factor * direction
+
+            # Implement clipping to original bounds
+            if original_data is not None:
+                for col in numeric_cols:
+                    if col in original_data.columns:
+                        orig_min = original_data[col].min()
+                        orig_max = original_data[col].max()
+                        synth_df[col] = synth_df[col].clip(lower=orig_min, upper=orig_max)
+                        # Ensure discrete data remains discrete if original was discrete
+                        if pd.api.types.is_integer_dtype(original_data[col]):
+                            synth_df[col] = synth_df[col].round().astype(int)
+        else:
+            self.logger.warning("differentiation_factor > 0 but no numeric columns or only 1 class found. Ignoring.")
+            
         return synth_df
 
 
@@ -1887,6 +1809,198 @@ class RealGenerator(BaseGenerator):
         model.train(max_epochs=epochs, train_size=0.9, early_stopping=True)
         model.module.eval()  # Ensure model is in eval mode for generation
 
+        # Check for advanced generation modes
+        use_scanvi = kwargs.get("use_scanvi", False)
+        use_contrastivevi = kwargs.get("use_contrastivevi", False)
+
+        # --- scANVI Branch ---
+        # scANVI is a semi-supervised model that learns condition-aware latent representations.
+        # It starts from a trained SCVI model and fine-tunes with label supervision.
+        if use_scanvi and target_col and target_col in adata_to_train.obs.columns:
+            self.logger.info("Initializing scANVI from trained scVI model...")
+            try:
+                scanvi_epochs = kwargs.get("scanvi_epochs", max(5, epochs // 5))
+                unlabeled_cat = kwargs.get("scanvi_unlabeled_category", "Unknown")
+
+                # Convert target_col to string (scANVI requires string labels)
+                adata_to_train.obs[target_col] = adata_to_train.obs[target_col].astype(str)
+
+                # Initialize scANVI from the trained scVI model
+                scanvi_model = scvi.model.SCANVI.from_scvi_model(
+                    scvi_model=model,
+                    labels_key=target_col,
+                    unlabeled_category=unlabeled_cat,
+                )
+                self.logger.info(f"Training scANVI model with {scanvi_epochs} epochs...")
+                scanvi_model.train(max_epochs=scanvi_epochs, train_size=0.9)
+                scanvi_model.module.eval()
+
+                # Use scANVI for generation
+                latent_samples_scanvi = scanvi_model.get_latent_representation()
+                unique_classes = adata_to_train.obs[target_col].unique()
+                orig_metadata = adata_to_train.obs[target_col].values
+
+                # Sample indices proportionally by class
+                indices = []
+                for cls in unique_classes:
+                    cls_indices = np.where(orig_metadata == cls)[0]
+                    n_cls = max(1, int(round(n_samples * len(cls_indices) / len(orig_metadata))))
+                    indices.extend(np.random.choice(cls_indices, size=n_cls, replace=True).tolist())
+                indices = np.array(indices[:n_samples])
+                np.random.shuffle(indices)
+
+                latent_samples = latent_samples_scanvi[indices].astype(np.float32)
+                synthetic_metadata = orig_metadata[indices]
+
+                # Apply differentiation factor in scANVI latent space
+                differentiation_factor = kwargs.get("differentiation_factor", 0.0)
+                if differentiation_factor > 0.0:
+                    self.logger.info(
+                        f"Applying differentiation factor {differentiation_factor} in scANVI latent space..."
+                    )
+                    global_centroid = np.mean(latent_samples, axis=0)
+                    for c in unique_classes:
+                        mask = synthetic_metadata == c
+                        if np.sum(mask) > 0:
+                            class_centroid = np.mean(latent_samples[mask], axis=0)
+                            direction = class_centroid - global_centroid
+                            shift = differentiation_factor * direction
+                            # Clamp to prevent wild decodings
+                            max_shift = 5.0
+                            shift_norm = np.linalg.norm(shift)
+                            if shift_norm > max_shift:
+                                shift = shift * (max_shift / shift_norm)
+                            latent_samples[mask] += shift
+
+                latent_noise_std = kwargs.get("latent_noise_std", 0.05)
+                latent_samples += np.random.randn(*latent_samples.shape).astype(np.float32) * latent_noise_std
+
+                import torch
+                with torch.no_grad():
+                    latent_tensor = torch.tensor(latent_samples).to(scanvi_model.device)
+
+                    # Library size from original
+                    if hasattr(adata_to_train.X, "toarray"):
+                        orig_lib_size = np.sum(adata_to_train.X.toarray(), axis=1)
+                    else:
+                        orig_lib_size = np.sum(adata_to_train.X, axis=1)
+                    if hasattr(orig_lib_size, "A1"):
+                        orig_lib_size = orig_lib_size.A1
+                    orig_log_lib = np.log(orig_lib_size + 1e-8)
+                    sampled_log_lib = orig_log_lib[indices]
+                    library_tensor = torch.tensor(
+                        sampled_log_lib, dtype=torch.float32
+                    ).unsqueeze(1).to(scanvi_model.device)
+
+                    batch_index = torch.zeros(len(indices), 1, dtype=torch.long).to(scanvi_model.device)
+                    gen_outputs = scanvi_model.module.generative(
+                        z=latent_tensor,
+                        library=library_tensor,
+                        batch_index=batch_index,
+                    )
+                    px_dist = gen_outputs["px"]
+                    try:
+                        synthetic_expression = px_dist.mean
+                    except Exception:
+                        synthetic_expression = px_dist.sample() if hasattr(px_dist, "sample") else torch.zeros((len(indices), adata.n_vars))
+
+                    if hasattr(synthetic_expression, "cpu"):
+                        synthetic_expression = synthetic_expression.cpu()
+                    synth_values = synthetic_expression.numpy()
+
+                synth_df = pd.DataFrame(synth_values, columns=adata.var_names)
+                synth_df[target_col] = synthetic_metadata
+                self.logger.info(f"scANVI synthesis complete. Generated {len(synth_df)} samples.")
+                return synth_df
+
+            except Exception as e:
+                self.logger.error(f"scANVI synthesis failed: {e}. Falling back to standard scVI.")
+
+        # --- ContrastiveVI Branch ---
+        # ContrastiveVI separates the latent space into "salient" (condition-specific) 
+        # and "background" (shared) components. Requires the contrastive_vi package.
+        if use_contrastivevi and target_col:
+            try:
+                from contrastive_vi.model import ContrastiveVI
+                self.logger.info("Using ContrastiveVI for salient latent differentiation...")
+
+                unique_classes = adata_to_train.obs[target_col].unique()
+                if len(unique_classes) >= 2:
+                    cls_list = list(unique_classes)
+                    bg_mask = adata_to_train.obs[target_col] == cls_list[0]
+                    fg_mask = adata_to_train.obs[target_col] == cls_list[1]
+                    background_indices = np.where(bg_mask)[0].tolist()
+                    target_indices = np.where(fg_mask)[0].tolist()
+
+                    ContrastiveVI.setup_anndata(adata_to_train)
+                    contrastive_model = ContrastiveVI(
+                        adata_to_train,
+                        background_indices=background_indices,
+                        target_indices=target_indices,
+                        n_latent=kwargs.get("n_latent", 10),
+                    )
+                    cvi_epochs = kwargs.get("epochs", 50)
+                    self.logger.info(f"Training ContrastiveVI with {cvi_epochs} epochs...")
+                    contrastive_model.train(max_epochs=cvi_epochs)
+
+                    salient_latent = contrastive_model.get_latent_representation(latent_key="salient")
+                    orig_metadata = adata_to_train.obs[target_col].values
+                    indices = np.random.choice(len(salient_latent), size=n_samples, replace=True)
+                    latent_samples = salient_latent[indices].astype(np.float32)
+                    synthetic_metadata = orig_metadata[indices]
+
+                    differentiation_factor = kwargs.get("differentiation_factor", 0.0)
+                    if differentiation_factor > 0.0:
+                        global_centroid = np.mean(latent_samples, axis=0)
+                        for c in unique_classes:
+                            mask = synthetic_metadata == c
+                            if np.sum(mask) > 0:
+                                cc = np.mean(latent_samples[mask], axis=0)
+                                direction = cc - global_centroid
+                                shift = differentiation_factor * direction
+                                shift_norm = np.linalg.norm(shift)
+                                if shift_norm > 5.0:
+                                    shift = shift * (5.0 / shift_norm)
+                                latent_samples[mask] += shift
+
+                    # Decode using the base SCVI model's decoder (ContrastiveVI shares it)
+                    import torch
+                    with torch.no_grad():
+                        latent_tensor = torch.tensor(latent_samples).to(contrastive_model.device)
+                        # Background latent = zeros (shared component)
+                        background_tensor = torch.zeros_like(latent_tensor).to(contrastive_model.device)
+                        library_tensor = torch.full(
+                            (n_samples, 1), np.log(1e4 + 1e-8), dtype=torch.float32
+                        ).to(contrastive_model.device)
+                        batch_index = torch.zeros(n_samples, 1, dtype=torch.long).to(contrastive_model.device)
+                        gen_outputs = contrastive_model.module.generative(
+                            z=latent_tensor,
+                            z_bg=background_tensor,
+                            library=library_tensor,
+                            batch_index=batch_index,
+                        )
+                        px_dist = gen_outputs["px"]
+                        try:
+                            synthetic_expression = px_dist.mean
+                        except Exception:
+                            synthetic_expression = torch.zeros((n_samples, adata.n_vars))
+                        if hasattr(synthetic_expression, "cpu"):
+                            synthetic_expression = synthetic_expression.cpu()
+                        synth_values = synthetic_expression.numpy()
+
+                    synth_df = pd.DataFrame(synth_values, columns=adata.var_names)
+                    synth_df[target_col] = synthetic_metadata
+                    self.logger.info(f"ContrastiveVI synthesis complete. Generated {len(synth_df)} samples.")
+                    return synth_df
+
+            except ImportError:
+                self.logger.warning(
+                    "ContrastiveVI not available (pip install contrastive-vi). "
+                    "Falling back to standard scVI."
+                )
+            except Exception as e:
+                self.logger.error(f"ContrastiveVI synthesis failed: {e}. Falling back to standard scVI.")
+
         # Decide generation strategy based on new parameters
         use_latent_sampling = kwargs.get("use_latent_sampling", True)
         differentiation_factor = kwargs.get("differentiation_factor", 0.0)
@@ -1928,12 +2042,10 @@ class RealGenerator(BaseGenerator):
                                 class_centroid = np.mean(latent_samples[mask], axis=0)
                                 direction = class_centroid - global_centroid
                                 
-                                # Apply stronger differentiation
-                                shift = (1 + differentiation_factor * 2.0) * direction
+                                # Apply differentiation
+                                shift = differentiation_factor * direction
                                 
                                 # Clamp shift to prevent wild decodings (inf values)
-                                # The latent space is typically standard normal N(0,1), so shifts > 2-3 standard deviations can be out-of-distribution.
-                                # However, to achieve strong differentiation as requested by the user, we relax this clamp to 5.0
                                 max_shift = 5.0
                                 shift_norm = np.linalg.norm(shift, axis=-1, keepdims=True)
                                 # Avoid division by zero
@@ -2034,6 +2146,7 @@ class RealGenerator(BaseGenerator):
 
         self.logger.info(f"scVI synthesis complete. Generated {len(synth_df)} samples.")
         return synth_df
+
 
     def _synthesize_gears(
         self,
