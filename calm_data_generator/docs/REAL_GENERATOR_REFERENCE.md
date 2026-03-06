@@ -27,6 +27,8 @@ gen = RealGenerator(
 | `minimal_report` | bool | `False` | Simplified report (faster) |
 | `random_state` | int | `None` | Seed for reproducibility |
 | `logger` | Logger | `None` | Custom Python Logger instance |
+| `verbose_training` | bool | `False` | Show Synthcity epoch-by-epoch loss in console during training |
+
 
 ---
 
@@ -98,6 +100,7 @@ The `model_params` dictionary allows fine-tuning internal parameters for each sy
 | `n_units_conditional` | `ctgan`, `tvae` | Number of units in conditional layers |
 | `n_units_in` | `ctgan`, `tvae` | Number of units in input layers |
 | `lr` | `ctgan`, `tvae` | Learning rate |
+| `differentiation_factor` | `ctgan`, `tvae`, `scvi` | *(v1.2.0)* Shift class centroids apart in latent/feature space. `0.0` = no shift, `1.0` = moderate, `2.0+` = strong separation |
 
 **Example:**
 ```python
@@ -1051,3 +1054,130 @@ synth = gen.generate(
 | **Clinical/Medical** | Use `ClinicalDataGenerator` |
 | **Streaming data** | Use `StreamGenerator` |
 | **Block/Batch data** | Use `RealBlockGenerator` |
+
+---
+
+## v1.2.0 New Features
+
+### Latent Space Differentiation (`differentiation_factor`)
+
+Available for `tvae`, `ctgan`, and `scvi`. Controls how far apart the class centroids are pushed in the latent (or feature) space during synthesis.
+
+```python
+synth = gen.generate(
+    data=df,
+    n_samples=500,
+    method="tvae",
+    target_col="group",
+    differentiation_factor=1.5  # Push classes further apart
+)
+```
+
+| Value | Effect |
+|-------|--------|
+| `0.0` | No shift (default behaviour) |
+| `0.5–1.0` | Subtle separation |
+| `1.5–2.0` | Moderate/strong class separation |
+| `> 2.0` | Risk of out-of-distribution samples – use with care |
+
+> **TVAE:** Shift is applied directly in the neural network latent space (mu vectors). 
+> **CTGAN:** Falls back to feature-space shift (GAN has no explicit encoder). 
+> **scVI:** Shift applied in the `z` latent space before decoding.
+
+---
+
+### Training Visibility (`verbose_training`)
+
+Pass `verbose_training=True` at construction time to let Synthcity print the epoch-by-epoch loss:
+
+```python
+gen = RealGenerator(verbose_training=True)
+gen.generate(data=df, n_samples=500, method="tvae", epochs=200)
+# → 2024-03-06 14:01:12 | INFO | tvae | epoch 1/200 | loss: 1.2341
+# → 2024-03-06 14:01:15 | INFO | tvae | epoch 2/200 | loss: 1.1872
+# → ...
+```
+
+For **scVI**, the PyTorch Lightning progress bar is always shown. After training, the final loss is also logged via the Python logger regardless of `verbose_training`.
+
+---
+
+### Introspection Accessor Methods
+
+After calling `generate()`, these methods expose internal model state:
+
+#### `get_encoder()`
+
+Returns the encoder network of the last trained model.
+
+```python
+synth = gen.generate(df, 500, method="tvae", target_col="label")
+encoder = gen.get_encoder()
+# Returns: nn.Module (inner VAE encoder) for tvae
+# Returns: scvi Module z_encoder for scvi
+# Returns: None for methods without explicit encoders (ctgan, cart...)
+```
+
+#### `get_decoder()`
+
+Returns the decoder network.
+
+```python
+decoder = gen.get_decoder()
+# Returns: nn.Module for tvae and scvi
+```
+
+#### `get_latest_embeddings()`
+
+Returns the latent space embeddings computed during the last synthesis that applied `differentiation_factor`.
+
+```python
+embeddings = gen.get_latest_embeddings()  # np.ndarray or None
+if embeddings is not None:
+    print(f"Embedding shape: {embeddings.shape}")  # (n_samples, n_latent)
+    # E.g. for UMAP visualization:
+    import umap
+    reducer = umap.UMAP()
+    projection = reducer.fit_transform(embeddings)
+```
+
+> Returns `None` if no differentiation was applied or if the model uses feature-space fallback.
+
+#### `get_training_history()`
+
+Returns the training history dict (**scVI/scANVI only**).
+
+```python
+synth = gen.generate(df, 500, method="scvi", epochs=100)
+history = gen.get_training_history()
+
+if history:
+    import matplotlib.pyplot as plt
+    elbo = history["elbo_train"]
+    plt.plot(elbo.values)
+    plt.xlabel("Epoch")
+    plt.ylabel("ELBO")
+    plt.title("scVI Training Evolution")
+    plt.show()
+```
+
+| Key | Description |
+|-----|-------------|
+| `train_loss_epoch` | Total training loss per epoch |
+| `elbo_train` | Evidence Lower Bound |
+| `reconstruction_loss_train` | Reconstruction (expression) loss |
+| `kl_local_train` | KL divergence – local per-cell term |
+| `kl_global_train` | KL divergence – global term |
+
+> Returns `None` for Synthcity-based models (TVAE, CTGAN). Use `verbose_training=True` for those.
+
+#### `get_synthesizer_model()`
+
+Returns the raw underlying model object (Synthcity plugin, scVI model, sklearn model, etc.).
+
+```python
+raw = gen.get_synthesizer_model()
+# tvae/ctgan: Synthcity plugin object
+# scvi:       scvi.model.SCVI instance
+# cart/rf:    FCSModel instance
+```
