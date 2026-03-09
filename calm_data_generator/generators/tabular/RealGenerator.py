@@ -806,17 +806,17 @@ class RealGenerator(BaseGenerator):
                     embeddings = mu
                     
             elif method == "ctgan":
-                # CTGAN does not have a formal encoder/decoder architecture to map BACK from feature space easily 
-                # within synthcity without custom coding on the DataSampler. In standard formulations, it generates
-                # directly from noise.
-                self.logger.warning(f"Latent differentiation for {method} is complex due to GAN architecture. Falling back to feature space.")
-                synth_df = syn.generate(count=n_samples).dataframe()
-                return self._apply_differentiation_factor(synth_df, data, target_col, differentiation_factor)
+                self.logger.warning(
+                    "differentiation_factor is not supported for ctgan (GAN architecture has no encoder). "
+                    "Generating without latent shift."
+                )
+                return syn.generate(count=n_samples).dataframe()
                 
             else:
-                self.logger.warning(f"Latent differentiation not natively supported for {method}. Falling back to feature space.")
-                synth_df = syn.generate(count=n_samples).dataframe()
-                return self._apply_differentiation_factor(synth_df, data, target_col, differentiation_factor)
+                self.logger.warning(
+                    f"differentiation_factor is not supported for {method}. Generating without latent shift."
+                )
+                return syn.generate(count=n_samples).dataframe()
 
             # Perform the latent shift on the embeddings
             unique_classes = data[target_col].unique()
@@ -865,46 +865,8 @@ class RealGenerator(BaseGenerator):
             return synth_df
 
         except Exception as e:
-            self.logger.error(f"Error during latent differentiation for {method}: {e}. Falling back to standard synthesis.")
-            synth_df = syn.generate(count=n_samples).dataframe()
-            return self._apply_differentiation_factor(synth_df, data, target_col, differentiation_factor)
-
-    def _apply_differentiation_factor(
-        self,
-        synthetic_data: pd.DataFrame,
-        original_data: pd.DataFrame,
-        target_col: str,
-        differentiation_factor: float
-    ) -> pd.DataFrame:
-        """Applies a multiplicative shift to class centroids to increase separability, and clips to original range."""
-        self.logger.info(f"Applying differentiation factor {differentiation_factor} in feature space...")
-        numeric_cols = synthetic_data.select_dtypes(include=[np.number]).columns
-        unique_classes = synthetic_data[target_col].unique()
-        
-        if len(unique_classes) > 1 and len(numeric_cols) > 0:
-            global_centroid = synthetic_data[numeric_cols].mean().values
-            for c in unique_classes:
-                mask = (synthetic_data[target_col] == c)
-                if mask.sum() > 0:
-                    class_centroid = synthetic_data.loc[mask, numeric_cols].mean().values
-                    # A less aggressive formula: shift = factor * direction 
-                    direction = class_centroid - global_centroid
-                    synthetic_data.loc[mask, numeric_cols] += differentiation_factor * direction
-
-            # Implement clipping to original bounds
-            if original_data is not None:
-                for col in numeric_cols:
-                    if col in original_data.columns:
-                        orig_min = original_data[col].min()
-                        orig_max = original_data[col].max()
-                        synthetic_data[col] = synthetic_data[col].clip(lower=orig_min, upper=orig_max)
-                        # Ensure discrete data remains discrete if original was discrete
-                        if pd.api.types.is_integer_dtype(original_data[col]):
-                            synthetic_data[col] = synthetic_data[col].round().astype(int)
-        else:
-            self.logger.warning("differentiation_factor > 0 but no numeric columns or only 1 class found. Ignoring.")
-            
-        return synthetic_data
+            self.logger.error(f"Error during latent differentiation for {method}: {e}. Generating without latent shift.")
+            return syn.generate(count=n_samples).dataframe()
 
 
     def _synthesize_bn(
