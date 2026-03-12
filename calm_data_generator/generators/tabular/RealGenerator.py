@@ -47,7 +47,7 @@ from calm_data_generator.generators.drift.DriftInjector import DriftInjector
 
 
 # Synthcity import
-from calm_data_generator.generators.persistence_models import SimpleDenoiser, FCSModel
+from calm_data_generator.generators.persistence_models import FCSModel
 
 
 # Suppress common warnings for cleaner output
@@ -802,9 +802,18 @@ class RealGenerator(BaseGenerator):
                 data_encoded = tabular_model.encode(data)
                 
                 data_tensor = torch.tensor(data_encoded.values, dtype=torch.float32).to(pytorch_model.device)
+                # encoder returns (mu, logvar)
+                unique_classes = data[target_col].unique()
+                cond_labels = (data[target_col] == unique_classes[1]).astype(int).values
+                cond_tensor = torch.nn.functional.one_hot(
+                    torch.tensor(cond_labels), num_classes=2
+                ).float().to(pytorch_model.device)
+                
+                # Sumamos las 2002 dimensiones + 2 del condicional = 2004
+                input_tensor = torch.cat([data_tensor, cond_tensor], dim=1)
                 with torch.no_grad():
-                    # encoder returns (mu, logvar)
-                    encoder_out = pytorch_model.encoder(data_tensor)
+                   
+                    encoder_out = pytorch_model.encoder(input_tensor)
                     if isinstance(encoder_out, (tuple, list)):
                         mu, logvar = encoder_out[0], encoder_out[1]
                     else:
@@ -826,8 +835,7 @@ class RealGenerator(BaseGenerator):
                 )
                 return syn.generate(count=n_samples).dataframe()
 
-            # Perform the latent shift on the embeddings
-            unique_classes = data[target_col].unique()
+           
             if len(unique_classes) == 2:
                 mask_0 = (data[target_col] == unique_classes[0]).values
                 mask_1 = (data[target_col] == unique_classes[1]).values
@@ -847,9 +855,17 @@ class RealGenerator(BaseGenerator):
                 self.latest_embeddings = embeddings.cpu().numpy()
                 
             # Decode back
+            
             if method == "tvae":
                 with torch.no_grad():
-                    reconstructed_tensor = pytorch_model.decoder(embeddings)
+                    # --- CONCATENAR LA CONDICIÓN PARA EL DECODER ---
+                    # embeddings tiene la dimensión latente (ej. 128)
+                    # cond_tensor tiene la dimensión de las clases (2)
+                    decoder_input = torch.cat([embeddings, cond_tensor], dim=1)
+                    
+                    # Pasamos el tensor combinado al decoder
+                    reconstructed_tensor = pytorch_model.decoder(decoder_input)
+                    
                 reconstructed_df = pd.DataFrame(
                     reconstructed_tensor.cpu().numpy(),
                     columns=data_encoded.columns
@@ -1132,141 +1148,7 @@ class RealGenerator(BaseGenerator):
     # These methods required ydata-synthetic library which is not used in this project.
     # For time series synthesis, use Synthcity's time series models or other alternatives.
 
-    def _synthesize_diffusion(
-        self, data: pd.DataFrame, n_samples: int, **kwargs
-    ) -> pd.DataFrame:
-        """
-        Synthesizes data using Tabular Diffusion (simple DDPM-like approach).
-        Uses PyTorch for a basic denoising diffusion implementation.
-        """
-        steps = kwargs.get("steps", 1000)  # Retrieve steps from kwargs
-        self.logger.info(f"Starting Tabular Diffusion synthesis ({steps} steps)...")
 
-        try:
-            import torch
-            import torch.nn as nn
-            from sklearn.preprocessing import StandardScaler, LabelEncoder
-        except ImportError:
-            self.logger.warning("PyTorch not available. Falling back to CTGAN.")
-            return self._synthesize_synthcity(data, n_samples, "ctgan", 300, 100)
-
-        # Preprocess: encode categoricals and scale numerics
-        df = data.copy()
-        encoders = {}
-        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-        cat_cols = df.select_dtypes(exclude=[np.number]).columns.tolist()
-
-        for col in cat_cols:
-            le = LabelEncoder()
-            df[col] = le.fit_transform(df[col].astype(str))
-            encoders[col] = le
-
-        scaler = StandardScaler()
-        X = scaler.fit_transform(df.values.astype(float))
-        X_tensor = torch.tensor(X, dtype=torch.float32)
-
-        n_features = X.shape[1]
-
-        # Move SimpleDenoiser outside or ensure it's pickleable.
-        # Since we can't easily move it out in this patch, we rely on torch.save usually,
-        # but for joblib pickling, local classes are an issue.
-        # FIX: Define SimpleDenoiser at module level (see below tool call) OR
-        # If we can't move it, we can't pickle it easily.
-        # Let's assume user accepts we define it at module level.
-
-        model = SimpleDenoiser(n_features)
-        optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-
-        # Beta schedule
-        betas = torch.linspace(1e-4, 0.02, steps)
-        alphas = 1.0 - betas
-        alphas_cumprod = torch.cumprod(alphas, dim=0)
-
-        # Training loop (simplified)
-        model.train()
-        epochs = min(100, steps)
-        batch_size = min(64, len(X_tensor))
-
-        for epoch in range(epochs):
-            perm = torch.randperm(len(X_tensor))
-            for i in range(0, len(X_tensor), batch_size):
-                batch = X_tensor[perm[i : i + batch_size]]
-                t = torch.randint(0, steps, (len(batch),))
-
-                # Forward diffusion
-                noise = torch.randn_like(batch)
-                sqrt_alpha = torch.sqrt(alphas_cumprod[t]).unsqueeze(-1)
-                sqrt_one_minus_alpha = torch.sqrt(1 - alphas_cumprod[t]).unsqueeze(-1)
-                noisy = sqrt_alpha * batch + sqrt_one_minus_alpha * noise
-
-                # Predict noise
-                pred_noise = model(noisy, t.float())
-                loss = nn.functional.mse_loss(pred_noise, noise)
-
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-
-        # Store model state for persistence
-        self.synthesizer = model
-        self.method = "diffusion"
-        # Store necessary components for generation in metadata or a dedicated attribute
-        # We need scaler, encoders, steps, alphas etc.
-        # Ideally, we should encapsulate this in a proper class, but for now we store in metadata.
-        self.metadata = {
-            "columns": df.columns.tolist(),
-            "numeric_cols": numeric_cols,
-            "cat_cols": cat_cols,
-            "encoders": encoders,
-            "scaler": scaler,
-            "steps": steps,
-            "betas": betas,
-            "alphas": alphas,
-            "alphas_cumprod": alphas_cumprod,
-            "n_features": n_features,
-        }
-
-        # Sampling (reverse diffusion) - use the generate helper logic (redundancy for now to match interface)
-        model.eval()
-        with torch.no_grad():
-            x = torch.randn(n_samples, n_features)
-            for t in reversed(range(steps)):
-                t_batch = torch.full((n_samples,), t, dtype=torch.float32)
-                pred_noise = model(x, t_batch)
-
-                alpha = alphas[t]
-                alpha_cumprod = alphas_cumprod[t]
-                beta = betas[t]
-
-                if t > 0:
-                    noise = torch.randn_like(x)
-                else:
-                    noise = 0
-
-                x = (1 / torch.sqrt(alpha)) * (
-                    x - (beta / torch.sqrt(1 - alpha_cumprod)) * pred_noise
-                ) + torch.sqrt(beta) * noise
-
-        # Inverse transform
-        synth_array = scaler.inverse_transform(x.numpy())
-        synth_df = pd.DataFrame(synth_array, columns=df.columns)
-
-        # Decode categoricals
-        for col, le in encoders.items():
-            synth_df[col] = (
-                synth_df[col].round().clip(0, len(le.classes_) - 1).astype(int)
-            )
-            synth_df[col] = le.inverse_transform(synth_df[col])
-
-        # Restore numeric types
-        for col in numeric_cols:
-            if data[col].dtype in [np.int64, np.int32]:
-                synth_df[col] = synth_df[col].round().astype(int)
-
-        self.logger.info(
-            f"Diffusion synthesis complete. Generated {len(synth_df)} samples."
-        )
-        return synth_df
 
     def _synthesize_ddpm(
         self, data: pd.DataFrame, n_samples: int, **kwargs
@@ -1299,10 +1181,10 @@ class RealGenerator(BaseGenerator):
             from synthcity.plugins import Plugins
             from synthcity.plugins.core.dataloader import GenericDataLoader
         except ImportError:
-            self.logger.warning(
-                "Synthcity not available. Falling back to custom diffusion."
+            raise ImportError(
+                "Synthcity is required for diffusion/ddpm synthesis. "
+                "Install with: pip install synthcity"
             )
-            return self._synthesize_diffusion(data, n_samples, **kwargs)
 
         # Extract DDPM-specific parameters
         n_iter = kwargs.get("n_iter", kwargs.get("epochs", 1000))
@@ -3289,9 +3171,7 @@ class RealGenerator(BaseGenerator):
                 **(kwargs or {}),
             )
 
-        elif method == "diffusion":
-            synth = self._synthesize_diffusion(data, n_samples, **(kwargs or {}))
-        elif method == "ddpm":
+        elif method in ["diffusion", "ddpm"]:
             synth = self._synthesize_ddpm(data, n_samples, **(kwargs or {}))
         elif method == "timegan":
             synth = self._synthesize_timegan(data, n_samples, **(kwargs or {}))
