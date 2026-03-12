@@ -27,8 +27,10 @@ from tqdm import tqdm
 
 import warnings
 from typing import Optional, Dict, Any, List, Union
+import logging
 import os
 import math
+import sys
 import tempfile
 import joblib
 import zipfile
@@ -70,8 +72,14 @@ class RealGenerator(BaseGenerator):
         # Handle Synthcity loggers (uses loguru)
         try:
             import synthcity.logger as sclog
-            if not verbose_training:
-                sclog.remove()
+            from loguru import logger as loguru_logger
+            
+            sclog.remove() # Remove default file sink
+            loguru_logger.remove() # Ensure all default sinks are removed
+            
+            if verbose_training:
+                # Add stdout sink for verbose training
+                loguru_logger.add(sys.stdout, level="DEBUG")
         except ImportError:
             pass
 
@@ -2032,9 +2040,12 @@ class RealGenerator(BaseGenerator):
                     )
                     px_dist = gen_outputs["px"]
                     try:
-                        synthetic_expression = px_dist.mean
+                        if hasattr(px_dist, "sample"):
+                            synthetic_expression = px_dist.sample()
+                        else:
+                            synthetic_expression = px_dist.mean
                     except Exception:
-                        synthetic_expression = px_dist.sample() if hasattr(px_dist, "sample") else torch.zeros((len(indices), adata.n_vars))
+                        synthetic_expression = torch.zeros((len(indices), adata.n_vars))
 
                     if hasattr(synthetic_expression, "cpu"):
                         synthetic_expression = synthetic_expression.cpu()
@@ -2114,7 +2125,10 @@ class RealGenerator(BaseGenerator):
                         )
                         px_dist = gen_outputs["px"]
                         try:
-                            synthetic_expression = px_dist.mean
+                            if hasattr(px_dist, "sample"):
+                                synthetic_expression = px_dist.sample()
+                            else:
+                                synthetic_expression = px_dist.mean
                         except Exception:
                             synthetic_expression = torch.zeros((n_samples, adata.n_vars))
                         if hasattr(synthetic_expression, "cpu"):
@@ -2237,19 +2251,19 @@ class RealGenerator(BaseGenerator):
             # We sample from it to get synthetic counts
             px_dist = generative_outputs["px"]
 
-            # Always use mean decoding.
-            # For faithful data (diff=0): mean gives denoised expression that mirrors original structure.
-            # For differentiated data (diff>0): mean preserves the latent-space shift signal cleanly.
-            # Stochastic sampling via px_dist.sample() washes out both signals with NegBinom noise.
+            # Always use stochastic sampling for realistic count data.
+            # While mean decoding preserves differentiation signals cleanly,
+            # it produces fractional denoised values that fail structural similarity metrics
+            # expecting sparsity and count distributions.
             try:
-                synthetic_expression = px_dist.mean
-            except Exception:
                 if hasattr(px_dist, "sample"):
                     synthetic_expression = px_dist.sample()
                 else:
-                    synthetic_expression = torch.zeros(
-                        (n_samples, adata.n_vars), dtype=torch.float32
-                    )
+                    synthetic_expression = px_dist.mean
+            except Exception:
+                synthetic_expression = torch.zeros(
+                    (n_samples, adata.n_vars), dtype=torch.float32
+                )
 
             if hasattr(synthetic_expression, "cpu"):
                 synthetic_expression = synthetic_expression.cpu()

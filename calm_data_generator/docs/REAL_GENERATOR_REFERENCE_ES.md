@@ -27,7 +27,7 @@ gen = RealGenerator(
 | `minimal_report` | bool | `False` | Informe simplificado (más rápido) |
 | `random_state` | int | `None` | Semilla para reproducibilidad |
 | `logger` | Logger | `None` | Instancia de Logger de Python personalizada |
-| `verbose_training` | bool | `False` | Muestra la pérdida por época de Synthcity en consola durante el entrenamiento |
+| `verbose_training` | bool | `False` | Muestra la pérdida por época de Synthcity en consola durante el entrenamiento. Útil para modelos como TVAE o CTGAN donde `get_training_history()` no está disponible. |
 
 
 ---

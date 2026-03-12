@@ -27,7 +27,8 @@ gen = RealGenerator(
 | `minimal_report` | bool | `False` | Simplified report (faster) |
 | `random_state` | int | `None` | Seed for reproducibility |
 | `logger` | Logger | `None` | Custom Python Logger instance |
-| `verbose_training` | bool | `False` | Show Synthcity epoch-by-epoch loss in console during training |
+| `verbose_training` | bool | `False` | Show Synthcity epoch-by-epoch loss in console during training. Useful for models like TVAE or CTGAN where `get_training_history()` is not available. |
+
 
 
 ---
