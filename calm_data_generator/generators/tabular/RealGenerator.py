@@ -1838,6 +1838,17 @@ class RealGenerator(BaseGenerator):
             if param in kwargs:
                 model_init_kwargs[param] = kwargs[param]
 
+        # Work on a copy of adata to avoid modifying the original if passed
+        if (
+            hasattr(data, "obs")
+            and hasattr(data, "X")
+            and not isinstance(data, pd.DataFrame)
+        ):
+            # 'adata' comes from the logic above (either original or converted)
+            adata_to_train = adata.copy()
+        else:
+            adata_to_train = adata
+
         # Setup and train scVI model
         scvi.model.SCVI.setup_anndata(adata_to_train)
         model = scvi.model.SCVI(adata_to_train, **model_init_kwargs)
