@@ -70,9 +70,11 @@ class RealGenerator(BaseGenerator):
         verbose_training: bool = False,
     ):
         # Handle Synthcity loggers (uses loguru)
+        self.training_history = {}
         try:
             import synthcity.logger as sclog
             from loguru import logger as loguru_logger
+            import re
             
             sclog.remove() # Remove default file sink
             loguru_logger.remove() # Ensure all default sinks are removed
@@ -80,6 +82,17 @@ class RealGenerator(BaseGenerator):
             if verbose_training:
                 # Add stdout sink for verbose training
                 loguru_logger.add(sys.stdout, level="DEBUG")
+
+            # Capture training losses from Synthcity (TVAE, etc.)
+            def capture_synthcity_metrics(message):
+                # Synthcity TVAE/VAE loss looks like: "[epoch/max_iter] Loss: 1.234"
+                loss_match = re.search(r"Loss: ([\d\.]+)", message)
+                if loss_match:
+                    if "loss_evolution" not in self.training_history:
+                        self.training_history["loss_evolution"] = []
+                    self.training_history["loss_evolution"].append(float(loss_match.group(1)))
+            
+            loguru_logger.add(capture_synthcity_metrics, level="DEBUG")
         except ImportError:
             pass
 
@@ -758,7 +771,12 @@ class RealGenerator(BaseGenerator):
         differentiation_factor = model_kwargs.pop("differentiation_factor", 0.0)
 
         syn = self._get_synthesizer("tvae", **model_kwargs)
-        syn.fit(data)
+        try:
+            syn.fit(data)
+        except Exception as e:
+            self.logger.error(f"TVAE training failed: {e}")
+            return syn.generate(count=n_samples).dataframe() if syn.fitted else None
+
         self.synthesizer = syn
         self.method = "tvae"
         self.metadata = {"columns": data.columns.tolist()}
@@ -1757,7 +1775,7 @@ class RealGenerator(BaseGenerator):
             DataFrame with synthetic samples
         """
         self.logger.info("Starting scVI synthesis for single-cell data...")
-        print(f"DEBUG: Entering _synthesize_scvi with data type: {type(data)}")
+        self.logger.debug(f"Entering _synthesize_scvi with data type: {type(data)}")
 
         try:
             import anndata
@@ -1803,32 +1821,34 @@ class RealGenerator(BaseGenerator):
                 for col in metadata_cols:
                     adata.obs[col] = data[col].values
 
+        # Separate parameters for model initialization and training
+        model_setup_params = [
+            "n_hidden", "n_latent", "n_layers", "dropout_rate", 
+            "dispersion", "gene_likelihood", "use_observed_lib_size", 
+            "latent_distribution"
+        ]
+        
+        model_init_kwargs = {
+            "n_latent": kwargs.get("n_latent", 10),
+            "n_layers": kwargs.get("n_layers", 1),
+        }
+        
+        # Pull any other model setup params from kwargs
+        for param in model_setup_params:
+            if param in kwargs:
+                model_init_kwargs[param] = kwargs[param]
+
         # Setup and train scVI model
-        n_latent = kwargs.get("n_latent", 10)
-        n_layers = kwargs.get("n_layers", 1)
-        epochs = kwargs.get("epochs", 100)
-        early_stopping = kwargs.get("early_stopping", True)
-
-        # Work on a copy of adata to avoid modifying the original if passed
-        if (
-            hasattr(data, "obs")
-            and hasattr(data, "X")
-            and not isinstance(data, pd.DataFrame)
-        ):
-            adata_to_train = adata.copy()
-        else:
-            adata_to_train = adata
-
         scvi.model.SCVI.setup_anndata(adata_to_train)
-        model = scvi.model.SCVI(
-            adata_to_train,
-            n_latent=n_latent,
-            n_layers=n_layers,
-        )
+        model = scvi.model.SCVI(adata_to_train, **model_init_kwargs)
+
+        # Map training parameters
+        epochs = kwargs.get("epochs", kwargs.get("max_epochs", 100))
+        early_stopping = kwargs.get("early_stopping", True)
 
         self.logger.info(f"Training scVI model with {epochs} epochs (Early stopping: {early_stopping})...")
         
-        # Comprehensive list of training parameters for scVI
+        # Comprehensive list of training parameters for scVI (Trainer parameters)
         train_params = [
             "accelerator", "devices", "train_size", "validation_size", 
             "shuffle_set_split", "load_sparse_tensor", "batch_size", 
@@ -1846,16 +1866,19 @@ class RealGenerator(BaseGenerator):
             if param in kwargs:
                 train_kwargs[param] = kwargs[param]
         
-        # Also allow any additional kwargs to pass through
-        # (This handles the **kwargs the user mentioned)
-        # Note: we need to be careful not to pass parameters already used for initial model setup
-        setup_params = ["n_latent", "n_layers", "dropout_rate", "dispersion", "gene_likelihood", "latent_distribution"]
+        # Also allow any additional kwargs to pass through to train(), 
+        # BUT EXCLUDE those used for model initialization to avoid TypeErrors.
         for k, v in kwargs.items():
-            if k not in train_kwargs and k not in setup_params:
+            if k not in train_kwargs and k not in model_setup_params and k != "epochs":
                 train_kwargs[k] = v
                 
-        model.train(**train_kwargs)
-        self._report_scvi_history(model)
+        try:
+            model.train(**train_kwargs)
+            self._report_scvi_history(model)
+        except Exception as e:
+            self.logger.error(f"scVI training failed: {e}")
+            return None
+
         model.module.eval()  # Ensure model is in eval mode for generation
 
         # Check for advanced generation modes
@@ -3282,7 +3305,7 @@ class RealGenerator(BaseGenerator):
 
             # --- Dynamics Injection (Feature Evolution & Target Construction) ---
             if synth is not None and dynamics_config:
-                print("DEBUG: Applying dynamics config...")
+                self.logger.debug("Applying dynamics config...")
                 self.logger.info("Applying dynamics injection config...")
                 from calm_data_generator.generators.dynamics.ScenarioInjector import (
                     ScenarioInjector,
@@ -3305,7 +3328,7 @@ class RealGenerator(BaseGenerator):
 
             # --- Drift Injection ---
             if synth is not None and drift_injection_config:
-                print("DEBUG: Applying drift injection...")
+                self.logger.debug("Applying drift injection...")
                 self.logger.info("Applying drift injection config...")
                 drift_out_dir = (
                     output_dir or "."
@@ -3377,7 +3400,7 @@ class RealGenerator(BaseGenerator):
                         )
 
             if self.auto_report and output_dir:
-                print("DEBUG: Generating report...")
+                self.logger.debug("Generating report...")
                 time_col_name = date_config.date_col if date_config else "timestamp"
 
                 # Build drift_config for report if drift was applied
@@ -3413,7 +3436,7 @@ class RealGenerator(BaseGenerator):
 
             # Save the generated dataset for inspection
             if save_dataset:  # Only save if save_dataset is True
-                print("DEBUG: Saving dataset...")
+                self.logger.debug("Saving dataset...")
                 if not output_dir:
                     raise ValueError(
                         "output_dir must be provided if save_dataset is True"
@@ -3427,11 +3450,11 @@ class RealGenerator(BaseGenerator):
                 except Exception as e:
                     self.logger.error(f"Failed to save synthetic dataset: {e}")
 
-            print(f"DEBUG: Returning synth for method '{method}'.")
+            self.logger.debug(f"Returning synth for method '{method}'.")
             return synth
         else:
-            print(
-                f"DEBUG: Synthesis method '{method}' failed to generate data (synth is None)."
+            self.logger.debug(
+                f"Synthesis method '{method}' failed to generate data (synth is None)."
             )
             self.logger.error(f"Synthesis method '{method}' failed to generate data.")
             return None
