@@ -1877,10 +1877,19 @@ class RealGenerator(BaseGenerator):
             if param in kwargs:
                 train_kwargs[param] = kwargs[param]
         
+        # Generation-specific parameters that should NEVER go to model.init or model.train
+        gen_params = [
+            "differentiation_factor", "latent_noise_std", "use_scanvi", 
+            "use_contrastivevi", "scanvi_epochs", "scanvi_unlabeled_category",
+            "use_latent_sampling", "preserve_library_size", "epochs", "max_epochs"
+        ]
+        
         # Also allow any additional kwargs to pass through to train(), 
-        # BUT EXCLUDE those used for model initialization to avoid TypeErrors.
+        # BUT EXCLUDE those used for model initialization OR generation logic to avoid TypeErrors.
         for k, v in kwargs.items():
-            if k not in train_kwargs and k not in model_setup_params and k != "epochs":
+            if (k not in train_kwargs and 
+                k not in model_setup_params and 
+                k not in gen_params):
                 train_kwargs[k] = v
                 
         try:
@@ -2213,8 +2222,8 @@ class RealGenerator(BaseGenerator):
                 synthetic_expression = synthetic_expression.cpu()
 
             synth_values = synthetic_expression.numpy()
-            print(
-                f"DEBUG: scVI synthesis produced values with shape: {synth_values.shape}"
+            self.logger.debug(
+                f"scVI synthesis produced values with shape: {synth_values.shape}"
             )
 
         # Use adata.var_names for column names (works for both DataFrame and AnnData input)
