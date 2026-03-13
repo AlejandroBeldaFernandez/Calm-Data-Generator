@@ -1807,6 +1807,7 @@ class RealGenerator(BaseGenerator):
         n_latent = kwargs.get("n_latent", 10)
         n_layers = kwargs.get("n_layers", 1)
         epochs = kwargs.get("epochs", 100)
+        early_stopping = kwargs.get("early_stopping", True)
 
         # Work on a copy of adata to avoid modifying the original if passed
         if (
@@ -1825,8 +1826,35 @@ class RealGenerator(BaseGenerator):
             n_layers=n_layers,
         )
 
-        self.logger.info(f"Training scVI model with {epochs} epochs...")
-        model.train(max_epochs=epochs, train_size=0.9, early_stopping=True)
+        self.logger.info(f"Training scVI model with {epochs} epochs (Early stopping: {early_stopping})...")
+        
+        # Comprehensive list of training parameters for scVI
+        train_params = [
+            "accelerator", "devices", "train_size", "validation_size", 
+            "shuffle_set_split", "load_sparse_tensor", "batch_size", 
+            "early_stopping", "datasplitter_kwargs", "plan_config", 
+            "plan_kwargs", "datamodule", "trainer_config"
+        ]
+        
+        train_kwargs = {
+            "max_epochs": epochs,
+            "early_stopping": early_stopping,
+        }
+        
+        # Add any user-provided parameters that match scVI training signature
+        for param in train_params:
+            if param in kwargs:
+                train_kwargs[param] = kwargs[param]
+        
+        # Also allow any additional kwargs to pass through
+        # (This handles the **kwargs the user mentioned)
+        # Note: we need to be careful not to pass parameters already used for initial model setup
+        setup_params = ["n_latent", "n_layers", "dropout_rate", "dispersion", "gene_likelihood", "latent_distribution"]
+        for k, v in kwargs.items():
+            if k not in train_kwargs and k not in setup_params:
+                train_kwargs[k] = v
+                
+        model.train(**train_kwargs)
         self._report_scvi_history(model)
         model.module.eval()  # Ensure model is in eval mode for generation
 
