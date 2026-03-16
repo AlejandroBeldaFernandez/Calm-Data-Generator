@@ -24,8 +24,12 @@ synthetic_data = generator.generate(
     block_column="Mes",
     drift_config=[
         DriftConfig(
-            method="inject_shift",
-            params={"shift_amount": 0.5, "feature_cols": ["FeatureA"]}
+            method="inject_feature_drift",
+            params={
+                "drift_type": "shift",
+                "drift_magnitude": 0.5,
+                "feature_cols": ["FeatureA"]
+            }
         )
     ]
 )

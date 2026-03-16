@@ -29,6 +29,12 @@ gen = RealGenerator(
 | `logger` | Logger | `None` | Instancia de Logger de Python personalizada |
 | `verbose_training` | bool | `False` | Muestra la pérdida por época de Synthcity en consola durante el entrenamiento. Útil para modelos como TVAE o CTGAN donde `get_training_history()` no está disponible. |
 
+> [!TIP]
+> Esta librería actúa como un wrapper de alto nivel. Para ajustes de hiperparámetros avanzados y detalles arquitectónicos profundos, recomendamos encarecidamente consultar la documentación de los motores originales:
+> - **Synthcity** (CTGAN, TVAE, DDPM, TimeGAN, FF): [Docs de Synthcity](https://github.com/vanderschaarlab/synthcity)
+> - **scvi-tools** (scVI, scANVI): [Docs de scvi-tools](https://docs.scvi-tools.org/)
+> - **GEARS**: [GitHub de GEARS](https://github.com/snap-stanford/GEARS)
+
 
 ---
 
@@ -86,6 +92,10 @@ synthetic_df = gen.generate(
 | `**kwargs` | Dict | `None` | Hiperparámetros específicos  |
 | `constraints` | List[Dict] | `None` | Restricciones de integridad |
 | `adversarial_validation` | bool | `False` | Activar reporte de discriminador (Real vs Sintético) |
+| `report_config` | ReportConfig | `None` | Objeto de configuración avanzada de informes |
+| `date_config` | DateConfig | `None` | Objeto de configuración avanzada de inyección de fechas |
+| `balance_target` | bool | `False` | Balancear automáticamente la distribución de clases en `target_col` |
+| `**kwargs` | Any | - | Parámetros específicos del método (ej., `epochs`, `n_latent`, `lr`) |
 
 ---
 
@@ -101,7 +111,7 @@ El diccionario `**kwargs` permite el ajuste fino de parámetros internos para ca
 | `batch_size` | `ctgan`, `tvae` | Tamaño del batch de entrenamiento (defecto: 500) |
 | `n_units_conditional` | `ctgan`, `tvae` | Unidades en capas condicionales |
 | `lr` | `ctgan`, `tvae` | Tasa de aprendizaje (Learning rate) |
-| `differentiation_factor` | `ctgan`, `tvae`, `scvi` | *(v1.2.0)* Desplaza los centroides de clase en el espacio latente/de características. `0.0` = sin desplazamiento, `1.0` = moderado, `2.0+` = separación fuerte |
+| `differentiation_factor` | `ctgan`, `tvae`, `scvi` | *(v1.2.0)* Desplaza los centroides de clase en el espacio latente. Utiliza **clamping adaptativo inteligente** y **expansión radial** para asegurar una separación estable incluso con factores altos (ej. 10.0) sin romper la calidad de la decodificación. |
 
 
 **Ejemplo:**
@@ -132,40 +142,11 @@ n_estimators=100,
 
 ```
 
-### Single-Cell (scVI)
+### Genómica Single-Cell
 
 Estos métodos están diseñados específicamente para **datos transcriptómicos (RNA-seq)**. Utilizan modelos generativos profundos para manejar la dispersión (sparsity) y el ruido técnico característico de los datos biológicos. Son ideales para corregir "efectos de lote" (batch effects) y generar perfiles de expresión genética sintéticos coherentes.
 
-**Formato de Entrada:** Acepta tanto `pd.DataFrame` como objetos `AnnData` directamente.
-
 #### scVI (Single-cell Variational Inference)
-
-**Entrada DataFrame:**
-```python
-synthetic = gen.generate(
-    data=expression_df,      # Filas=células, Columnas=genes
-    n_samples=1000,
-    method="scvi",
-    target_col="cell_type",  # Columna de metadatos opcional
-    epochs=100,
-    n_latent=10,
-    n_layers=1,
-    
-)
-
-# GEARS - Predicción de Perturbaciones basada en Grafos
-synthetic = gen.generate(
-    expression_df, 500,
-    method='gears',
-    perturbations=['GENE1', 'GENE2'],  # Requerido: genes a perturbar
-    epochs=20,
-    batch_size=32,
-    device='cpu'
-)
-> **IMPORTANTE:** GEARS requiere instalación desde el código fuente (`pip install "git+https://github.com/snap-stanford/GEARS.git@f374e43"`) y PyTorch >= 2.4.0.
-
-**Formato de Entrada:** Acepta objetos `pd.DataFrame`, `AnnData` o rutas de archivo (`.h5`, `.h5ad` o `.csv`) directamente.
-
 **Formato de Entrada:** Acepta objetos `pd.DataFrame`, `AnnData` o rutas de archivo (`.h5`, `.h5ad` o `.csv`) directamente.
 
 **Uso de Rutas de Archivo (H5/H5AD/CSV):**
@@ -178,7 +159,6 @@ synthetic = gen.generate(
     target_col="cell_type"
 )
 ```
-
 
 **Entrada AnnData (Recomendado para datos single-cell):**
 ```python
@@ -194,8 +174,7 @@ synthetic = gen.generate(
     target_col="cell_type",  # Debe estar en adata.obs
     epochs=100,
     n_latent=10,
-    n_layers=1,
-    
+    n_layers=1
 )
 # Retorna pd.DataFrame con columnas de genes + metadatos
 ```
@@ -205,19 +184,12 @@ synthetic = gen.generate(
 | `epochs` | Épocas de entrenamiento (default: 100) |
 | `n_latent` | Dimensionalidad del espacio latente (default: 10) |
 | `n_layers` | Número de capas ocultas (default: 1) |
-
-
-
-> **Soporte AnnData:** Al pasar un objeto `AnnData`, este se utiliza directamente sin conversión, preservando la estructura original. El resultado es siempre un `pd.DataFrame` que contiene tanto la expresión génica como los metadatos de las observaciones (`obs`).
-
-
-```
-
-| Parámetro | Descripción |
-|-----------|-------------|
-| `epochs` | Épocas de entrenamiento (default: 100) |
-| `n_latent` | Dimensionalidad del espacio latente (default: 10) |
-| `condition_col` | Columna con etiquetas de condición/lote (requerido) |
+| `differentiation_factor` | Factor de separación latente. Valores altos (1.0-10.0) empujan las clases en el espacio latente para crear datos sintéticos más separables. |
+| `use_scanvi` | Si es True, utiliza el modelo semi-supervisado scANVI. Recomendado cuando se tienen etiquetas (`target_col`) ya que proporciona una separación de clases mucho mejor que scVI estándar. |
+| `use_latent_sampling` | Controla la fidelidad de generación. Si es True, muestrea desde "anclas" de datos reales para preservar la textura específica del paciente. Si es False, genera desde ruido (síntesis pura). |
+| `preserve_library_size` | Si es True, las células generadas mantendrán una distribución de conteos totales (library size) similar a los originales. Crucial para el realismo en RNA-seq. |
+| `latent_noise_std` | Magnitud del ruido para el muestreo del espacio latente (mayor = más diversidad, menor = más fidelidad). |
+| `use_contrastivevi` | *(Avanzado)* Usa ContrastiveVI para separar la variación "saliente" (específica de la enfermedad) del ruido de fondo. Requiere el paquete `contrastive_vi`. |
 
 
 
@@ -346,13 +318,9 @@ Si tu columna objetivo (`target`) tiene clases muy minoritarias que quieres pote
 
 ### `ddpm` - Synthcity TabDDPM (Difusión Tabular Avanzada)
 
-**Tipo:** Deep Learning (Modelo de Difusión)
-**Mejor para:** Síntesis tabular de alta calidad, entornos de producción, grandes datasets
-**Requisitos:** `synthcity` (incluido en instalación base de deep learning)
-
-**Type:** Deep Learning (Diffusion Model)  
-**Best For:** High-quality tabular synthesis, production environments, large datasets  
-**Requirements:** `synthcity` (included in base installation)
+**Tipo:** Deep Learning (Modelo de Difusión)  
+**Mejor para:** Síntesis tabular de alta calidad, entornos de producción, grandes datasets  
+**Requisitos:** `synthcity` (incluido en la instalación base)
 
 #### Descripción
 
@@ -374,7 +342,7 @@ TabDDPM (Tabular Denoising Diffusion Probabilistic Model) es la implementación 
 - Tienes **recursos computacionales limitados**
 - Necesitas **modificaciones personalizadas** al algoritmo
 
-#### Parameters
+#### Parámetros
 
 ```python
 synth = gen.generate(
@@ -405,49 +373,49 @@ synth = gen.generate(
 )
 ```
 
-#### Parameter Details
+#### Detalles de Parámetros
 
-| Parameter | Type | Default | Description |
+| Parámetro | Tipo | Defecto | Descripción |
 |-----------|------|---------|-------------|
-| `n_iter` | int | 1000 | Number of training epochs |
-| `lr` | float | 0.002 | Learning rate for optimizer |
-| `batch_size` | int | 1024 | Training batch size |
-| `num_timesteps` | int | 1000 | Number of diffusion timesteps |
-| `scheduler` | str | `'cosine'` | Beta scheduler: `'cosine'` (recommended) or `'linear'` |
-| `gaussian_loss_type` | str | `'mse'` | Loss function: `'mse'` or `'kl'` |
-| `model_type` | str | `'mlp'` | Architecture: `'mlp'`, `'resnet'`, or `'tabnet'` |
-| `model_params` | dict | See above | Architecture-specific parameters |
-| `is_classification` | bool | False | Set to True for classification tasks |
+| `n_iter` | int | 1000 | Número de épocas de entrenamiento |
+| `lr` | float | 0.002 | Tasa de aprendizaje para el optimizador |
+| `batch_size` | int | 1024 | Tamaño de batch de entrenamiento |
+| `num_timesteps` | int | 1000 | Número de timesteps de difusión |
+| `scheduler` | str | `'cosine'` | Planificador Beta: `'cosine'` (recomendado) o `'linear'` |
+| `gaussian_loss_type` | str | `'mse'` | Función de pérdida: `'mse'` o `'kl'` |
+| `model_type` | str | `'mlp'` | Arquitectura: `'mlp'`, `'resnet'`, o `'tabnet'` |
+| `model_params` | dict | Ver arriba | Parámetros específicos de la arquitectura |
+| `is_classification` | bool | False | Establecer en True para tareas de clasificación |
 
-#### Model Types
+#### Tipos de Modelo
 
 **MLP (Multi-Layer Perceptron)**
-- Best for: General tabular data
-- Speed: Fast
-- Parameters: `n_layers_hidden`, `n_units_hidden`, `dropout`
+- Mejor para: Datos tabulares generales
+- Velocidad: Rápida
+- Parámetros: `n_layers_hidden`, `n_units_hidden`, `dropout`
 
 **ResNet (Residual Network)**
-- Best for: Complex feature relationships
-- Speed: Medium
-- Parameters: `n_layers_hidden`, `n_units_hidden`, `dropout`
+- Mejor para: Relaciones complejas entre características
+- Velocidad: Media
+- Parámetros: `n_layers_hidden`, `n_units_hidden`, `dropout`
 
 **TabNet**
-- Best for: Tabular data with feature importance
-- Speed: Slower
-- Parameters: Specific to TabNet architecture
+- Mejor para: Datos tabulares con importancia de características
+- Velocidad: Más lenta
+- Parámetros: Específicos de la arquitectura TabNet
 
-#### Comparison: `diffusion` vs `ddpm`
+#### Comparación: `diffusion` vs `ddpm`
 
-| Aspect | `diffusion` (custom) | `ddpm` (Synthcity) |
+| Aspecto | `diffusion` (personalizado) | `ddpm` (Synthcity) |
 |--------|---------------------|-------------------|
-| **Speed** | ⚡ Fast (100 epochs) | 🐢 Slower (1000 epochs) |
-| **Quality** | ⭐⭐⭐ Good | ⭐⭐⭐⭐ Excellent |
-| **Architectures** | MLP only | MLP/ResNet/TabNet |
-| **Scheduler** | Linear | Cosine/Linear |
-| **Batch Size** | 64 | 1024 |
-| **Use Case** | Quick prototyping | Production quality |
-| **Customization** | Easy to modify | Black box |
-| **Maintenance** | Your responsibility | Synthcity team |
+| **Velocidad** | ⚡ Rápida (100 épocas) | 🐢 Más lenta (1000 épocas) |
+| **Calidad** | ⭐⭐⭐ Buena | ⭐⭐⭐⭐ Excelente |
+| **Arquitecturas** | Solo MLP | MLP/ResNet/TabNet |
+| **Scheduler** | Lineal | Cosine/Linear |
+| **Tamaño de Batch** | 64 | 1024 |
+| **Caso de Uso** | Prototipado rápido | Calidad de producción |
+| **Personalización** | Fácil de modificar | Caja negra |
+| **Mantenimiento** | Tu responsabilidad | Equipo de Synthcity |
 
 #### Usage Examples
 
@@ -527,7 +495,7 @@ TimeGAN espera datos en un formato temporal específico:
 - **Agrupación por entidad**: Si es multi-entidad, agrupa por ID de entidad
 - **Pasos consistentes**: Preferible intervalos de tiempo regulares
 
-#### Parameters
+#### Parámetros
 
 ```python
 synth = gen.generate(
@@ -543,16 +511,16 @@ synth = gen.generate(
 )
 ```
 
-#### Parameter Details
+#### Detalles de Parámetros
 
-| Parameter | Type | Default | Description |
+| Parámetro | Tipo | Defecto | Descripción |
 |-----------|------|---------|-------------|
-| `n_iter` | int | 1000 | Number of training epochs |
-| `n_units_hidden` | int | 100 | Number of hidden units in RNN layers |
-| `batch_size` | int | 128 | Training batch size |
-| `lr` | float | 0.001 | Learning rate for optimizer |
+| `n_iter` | int | 1000 | Número de épocas de entrenamiento |
+| `n_units_hidden` | int | 100 | Número de unidades ocultas en capas RNN |
+| `batch_size` | int | 128 | Tamaño de batch de entrenamiento |
+| `lr` | float | 0.001 | Tasa de aprendizaje para el optimizador |
 
-#### Usage Examples
+#### Ejemplos de Uso
 
 **Basic Time Series:**
 ```python
@@ -589,37 +557,31 @@ synth = gen.generate(
 
 ### `timevae` - TimeVAE (Time Series VAE)
 
-**Type:** Deep Learning (VAE for Time Series)  
-**Best For:** Regular time series, faster training than TimeGAN  
-**Requirements:** `synthcity` (included in base installation)
+**Tipo:** Deep Learning (VAE para Series Temporales)  
+**Mejor para:** Series temporales regulares, entrenamiento más rápido que TimeGAN  
+**Requisitos:** `synthcity` (incluido en la instalación base)
 
-#### Description
+#### Descripción
 
-TimeVAE is a variational autoencoder designed for temporal data. It's generally faster than TimeGAN and works well for regular time series with consistent patterns.
+TimeVAE es un autoencoder variacional diseñado para datos temporales. Generalmente es más rápido que TimeGAN y funciona bien para series temporales regulares con patrones consistentes.
 
-#### When to Use
+#### Cuándo usarlo
 
-✅ **Use `timevae` when:**
-- You have **regular time series** data
-- You need **faster training** than TimeGAN
-- Working with **consistent temporal patterns**
-- You want **good quality** with **less computation**
-- You have **moderate-length sequences**
+✅ **Usa `timevae` cuando:**
+- Tienes datos de **series temporales regulares**
+- Necesitas un **entrenamiento más rápido** que TimeGAN
+- Trabajas con **patrones temporales consistentes**
+- Quieres **buena calidad** con **menos computación**
+- Tienes **secuencias de longitud moderada**
 
-❌ **No uses `timevae` when:**
-- You have **highly irregular** time series
-- You need **maximum quality** (use `timegan` instead)
-- Working with **very complex** temporal dynamics
-- You have **simple tabular data** (use `ctgan` or `ddpm`)
+#### Requisitos de Datos
 
-#### Data Requirements
+Similar a TimeGAN:
+- **Orden temporal**: Datos ordenados por tiempo
+- **Intervalos regulares**: Funciona mejor con pasos de tiempo consistentes
+- **Agrupación por entidad**: Si es multi-entidad, agrupa por ID de entidad
 
-Similar to TimeGAN:
-- **Temporal ordering**: Data sorted by time
-- **Regular intervals**: Works best with consistent timesteps
-- **Entity grouping**: If multi-entity, group by entity ID
-
-#### Parameters
+#### Parámetros
 
 ```python
 synth = gen.generate(
@@ -638,13 +600,13 @@ synth = gen.generate(
 
 #### Parameter Details
 
-| Parameter | Type | Default | Description |
+| Parámetro | Tipo | Defecto | Descripción |
 |-----------|------|---------|-------------|
-| `n_iter` | int | 1000 | Number of training epochs |
-| `decoder_n_layers_hidden` | int | 2 | Number of hidden layers in decoder |
-| `decoder_n_units_hidden` | int | 100 | Number of hidden units in decoder |
-| `batch_size` | int | 128 | Training batch size |
-| `lr` | float | 0.001 | Learning rate for optimizer |
+| `n_iter` | int | 1000 | Número de épocas de entrenamiento |
+| `decoder_n_layers_hidden` | int | 2 | Número de capas ocultas en el decodificador |
+| `decoder_n_units_hidden` | int | 100 | Número de unidades ocultas en el decodificador |
+| `batch_size` | int | 128 | Tamaño de batch de entrenamiento |
+| `lr` | float | 0.001 | Tasa de aprendizaje para el optimizador |
 
 ---
 
@@ -687,15 +649,15 @@ new_samples = loaded_gen.generate(n_samples=500)
 
 6. **Desbalance severo:** Usa `smote` o `adasyn` con `target_col`.
 
-#### Comparison: `timegan` vs `timevae`
+#### Comparación: `timegan` vs `timevae`
 
-| Aspect | `timegan` | `timevae` |
+| Aspecto | `timegan` | `timevae` |
 |--------|-----------|-----------|
-| **Speed** | 🐢 Slower | ⚡ Faster |
-| **Quality** | ⭐⭐⭐⭐ Excellent | ⭐⭐⭐ Good |
-| **Complexity** | Handles complex patterns | Best for regular patterns |
-| **Training Time** | Longer | Shorter |
-| **Use Case** | Complex temporal dynamics | Regular time series |
+| **Velocidad** | 🐢 Más lenta | ⚡ Más rápida |
+| **Calidad** | ⭐⭐⭐⭐ Excelente | ⭐⭐⭐ Buena |
+| **Complejidad** | Maneja patrones complejos | Mejor para patrones regulares |
+| **Tiempo Entr.** | Mayor | Menor |
+| **Caso de Uso** | Dinámicas temporales complejas | Series temporales regulares |
 
 #### Usage Examples
 
@@ -794,20 +756,20 @@ synth = gen.generate(
 
 ---
 
-## Method Selection Guide
+## Guía de Selección de Métodos
 
-### For Tabular Data
+### Para Datos Tabulares
 
-| Scenario | Recommended Method | Alternative |
+| Escenario | Método Recomendado | Alternativa |
 |----------|-------------------|-------------|
-| **Quick prototyping** | `diffusion` | `cart`, `rf` |
-| **Production quality** | `ddpm` | `ctgan` |
-| **Large datasets (>100k)** | `ddpm`, `lgbm` | `ctgan` |
-| **Small datasets (<1k)** | `cart`, `rf` | `diffusion` |
-| **Class imbalance** | `smote`, `adasyn` | `ctgan` |
-| **Preserve correlations** | `ctgan`, `ddpm` | `copula` |
-| **Fast generation** | `cart`, `diffusion` | `rf` |
-| **Maximum quality** | `ddpm` (ResNet) | `ctgan` |
+| **Prototipado rápido** | `diffusion` | `cart`, `rf` |
+| **Calidad de producción** | `ddpm` | `ctgan` |
+| **Datasets grandes (>100k)** | `ddpm`, `lgbm` | `ctgan` |
+| **Datasets pequeños (<1k)** | `cart`, `rf` | `diffusion` |
+| **Desbalance de clases** | `smote`, `adasyn` | `ctgan` |
+| **Preservar correlaciones** | `ctgan`, `ddpm` | `copula` |
+| **Generación rápida** | `cart`, `diffusion` | `rf` |
+| **Calidad máxima** | `ddpm` (ResNet) | `ctgan` |
 
 ### Para Series Temporales
 
@@ -820,7 +782,7 @@ synth = gen.generate(
 | **Secuencias multi-entidad** | `timegan` | `fflows` |
 | **Calidad máxima** | `timegan` | `fflows` |
 
-### For Special Cases
+### Para Casos Especiales
 
 | Tipo de Dato | Método Recomendado |
 |-----------|-------------------|

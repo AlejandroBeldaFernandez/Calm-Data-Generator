@@ -1,6 +1,6 @@
 # Clinical Block Generator Reference
 
-The `calm_data_generator.generators.clinical.ClinicGeneratorBlock` module provides `ClinicalDataGeneratorBlock`, a specialized generator for creating block-structured clinical data. It builds upon `SyntheticBlockGenerator` but leverages `ClinicalDataGenerator` for domain-specific feature mapping and ensures consistency across patient visits or data batches.
+The `calm_data_generator.generators.clinical.ClinicGeneratorBlock` module provides `ClinicalDataGeneratorBlock`, a specialized generator for creating block-structured clinical data. It utilizes `ClinicalDataGenerator` for domain-specific feature mapping and ensures consistency across patient visits or data batches.
 
 ## Class: `ClinicalDataGeneratorBlock`
 

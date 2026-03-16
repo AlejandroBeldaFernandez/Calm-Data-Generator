@@ -868,6 +868,9 @@ class RealGenerator(BaseGenerator):
             # 4. Soft-clamping (Tanh)
             # This ensures that higher differentiation_factor still produces 
             # more separation than lower ones, but at a decreasing rate.
+            if raw_shift_norm < 1e-9:
+                continue
+                
             dampening = torch.tanh(raw_shift_norm / max_allowed_shift)
             intelligent_shift = (raw_shift_vector / raw_shift_norm) * (max_allowed_shift * dampening)
             
@@ -1904,7 +1907,7 @@ class RealGenerator(BaseGenerator):
         ]
         
         model_init_kwargs = {
-            "n_latent": kwargs.get("n_latent", 10),
+            "n_latent": kwargs.get("n_latent", 30),
             "n_layers": kwargs.get("n_layers", 1),
         }
         
@@ -1912,6 +1915,10 @@ class RealGenerator(BaseGenerator):
         for param in model_setup_params:
             if param in kwargs:
                 model_init_kwargs[param] = kwargs[param]
+
+        # Use target_col for dispersion if provided and not explicitly overridden
+        if target_col and "dispersion" not in model_init_kwargs:
+            model_init_kwargs["dispersion"] = "gene-label"
 
         # Work on a copy of adata to avoid modifying the original if passed
         if (
@@ -1925,11 +1932,15 @@ class RealGenerator(BaseGenerator):
             adata_to_train = adata
 
         # Setup and train scVI model
-        scvi.model.SCVI.setup_anndata(adata_to_train)
+        if target_col and target_col in adata_to_train.obs.columns:
+            scvi.model.SCVI.setup_anndata(adata_to_train, labels_key=target_col)
+        else:
+            scvi.model.SCVI.setup_anndata(adata_to_train)
+            
         model = scvi.model.SCVI(adata_to_train, **model_init_kwargs)
 
         # Map training parameters
-        epochs = kwargs.get("epochs", kwargs.get("max_epochs", 100))
+        epochs = kwargs.get("epochs", kwargs.get("max_epochs", 200))
         early_stopping = kwargs.get("early_stopping", True)
 
         self.logger.info(f"Training scVI model with {epochs} epochs (Early stopping: {early_stopping})...")
@@ -1998,6 +2009,14 @@ class RealGenerator(BaseGenerator):
                     labels_key=target_col,
                     unlabeled_category=unlabeled_cat,
                 )
+                
+                # If scanvi_epochs is not provided, we use a more generous default or respect epochs if low
+                if "scanvi_epochs" not in kwargs:
+                    if epochs > 50:
+                        scanvi_epochs = max(20, epochs // 5)
+                    else:
+                        scanvi_epochs = epochs # If base epochs are low, use same for scanvi
+                
                 self.logger.info(f"Training scANVI model with {scanvi_epochs} epochs...")
                 scanvi_model.train(max_epochs=scanvi_epochs, train_size=0.9)
                 self._report_scvi_history(scanvi_model)
@@ -2020,8 +2039,6 @@ class RealGenerator(BaseGenerator):
                 latent_samples = latent_samples_scanvi[indices].astype(np.float32)
                 synthetic_metadata = orig_metadata[indices]
 
-                # Apply differentiation factor in scANVI latent space
-                differentiation_factor = kwargs.get("differentiation_factor", 0.0)
                 # Apply unified latent shift in scANVI space
                 differentiation_factor = kwargs.get("differentiation_factor", 0.0)
                 if differentiation_factor > 0.0:
@@ -2125,11 +2142,22 @@ class RealGenerator(BaseGenerator):
                     import torch
                     with torch.no_grad():
                         latent_tensor = torch.tensor(latent_samples).to(contrastive_model.device)
-                        # Background latent = zeros (shared component)
+                        # Use sampled library size if possible, else use mean
+                        if hasattr(adata_to_train.X, "toarray"):
+                            orig_lib_size = np.sum(adata_to_train.X.toarray(), axis=1)
+                        else:
+                            orig_lib_size = np.sum(adata_to_train.X, axis=1)
+                        if hasattr(orig_lib_size, "A1"):
+                            orig_lib_size = orig_lib_size.A1
+                        
+                        log_library_size = np.log(orig_lib_size + 1e-8)
+                        sampled_log_lib = np.random.choice(log_library_size, size=n_samples, replace=True)
+                        
+                        library_tensor = torch.tensor(
+                            sampled_log_lib, dtype=torch.float32
+                        ).unsqueeze(1).to(contrastive_model.device)
+                        
                         background_tensor = torch.zeros_like(latent_tensor).to(contrastive_model.device)
-                        library_tensor = torch.full(
-                            (n_samples, 1), np.log(1e4 + 1e-8), dtype=torch.float32
-                        ).to(contrastive_model.device)
                         batch_index = torch.zeros(n_samples, 1, dtype=torch.long).to(contrastive_model.device)
                         gen_outputs = contrastive_model.module.generative(
                             z=latent_tensor,
@@ -2165,7 +2193,7 @@ class RealGenerator(BaseGenerator):
         # Decide generation strategy based on new parameters
         use_latent_sampling = kwargs.get("use_latent_sampling", True)
         differentiation_factor = kwargs.get("differentiation_factor", 0.0)
-        latent_noise_std = kwargs.get("latent_noise_std", 0.1)
+        latent_noise_std = kwargs.get("latent_noise_std", 0.05)
 
         import torch
 

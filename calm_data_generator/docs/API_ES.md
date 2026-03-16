@@ -95,19 +95,18 @@ from calm_data_generator.generators.dynamics import ScenarioInjector
 
 ---
 
-### privacy - Transformaciones de Privacidad
+### privacy - Transformaciones de Privacidad (Integrado)
+
+Las funciones de privacidad están integradas en el `QualityReporter`. Puedes evaluar la privacidad usando:
 
 ```python
-from calm_data_generator.privacy import (
-    pseudonymize_columns,
-    add_laplace_noise,
-    generalize_numeric_to_ranges,
-    generalize_categorical_by_mapping,
-    shuffle_columns
-)
+reporter.generate_comprehensive_report(..., privacy_check=True)
 ```
 
----
+O usar transformaciones manuales para protección:
+- `pseudonymize_columns`
+- `add_laplace_noise`
+- `shuffle_columns`
 
 ## Instalación
 

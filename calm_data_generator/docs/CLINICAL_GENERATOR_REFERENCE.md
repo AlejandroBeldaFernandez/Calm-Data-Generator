@@ -87,7 +87,7 @@ data = gen.generate(
     
     # Drift Configuration (using DriftConfig objects)
     demographics_drift_config=[
-        DriftConfig(method="inject_feature_drift", params={"feature_cols": ["Age"], "drift_magnitude": 0.5})
+        DriftConfig(method="inject_feature_drift", feature_cols=["Age"], magnitude=0.5)
     ],
     
     # Detailed configurations

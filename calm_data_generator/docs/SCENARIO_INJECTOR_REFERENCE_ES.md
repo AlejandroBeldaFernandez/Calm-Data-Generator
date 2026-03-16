@@ -62,9 +62,11 @@ df_evolved = injector.apply_config(df, scenario_conf)
 | `trend` / `linear` | Cambio constante | Ventas, inflación | `y = x + pendiente * t` |
 | `exponential_growth` | Incremento acelerado | Crecimiento viral | `y = x * (1 + tasa)^t` |
 | `decay` | Valores decrecientes | Pérdida de retención | `y = x * (1 - tasa)^t` |
-| `seasonal` | Patrón cíclico | Vacaciones, clima | `y = x + A * sin(2πt/P)` |
+| `seasonal` / `cycle` | Patrón cíclico | Vacaciones, clima | `y = x + A * sin(2πt/P)` |
 | `step` | Salto repentino | Cambio política, precio | `y = x + valor si t > paso` |
 | `noise` | Fluctuación aleatoria | Error sensor, ruido mercado | `y = x + N(0, escala)` |
+| `random_walk` | Paseo aleatorio | Precios de acciones | `y = x + Σ N(0, paso_std)` |
+| `sigmoid` | Curva en S | Adopción tecnológica | `y = x + A / (1 + e^{-(t-c)/w})` |
 
 ---
 

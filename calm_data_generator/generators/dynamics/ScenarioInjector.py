@@ -102,12 +102,12 @@ class ScenarioInjector:
 
             delta = np.zeros_like(t, dtype=float)
 
-            if drift_type == "linear":
+            if drift_type in ["linear", "trend"]:
                 slope = config.slope if config.slope is not None else 0.0
                 intercept = config.intercept if config.intercept is not None else 0.0
                 delta = slope * t + intercept
 
-            elif drift_type == "cycle" or drift_type == "sinusoidal":
+            elif drift_type in ["cycle", "sinusoidal", "cyclic", "seasonal"]:
                 period = config.period if config.period is not None else 100.0
                 amplitude = config.amplitude if config.amplitude is not None else 1.0
                 phase = config.phase if config.phase is not None else 0.0
@@ -117,12 +117,46 @@ class ScenarioInjector:
                 center = config.center if config.center is not None else len(t) / 2
                 width = config.width if config.width is not None else len(t) / 10
                 amplitude = config.amplitude if config.amplitude is not None else 1.0
-                # Sigmoid function: 1 / (1 + exp(-(t-center)/width))
-                # Scaled by amplitude
-                # Avoid overflow
                 z = (t - center) / (width + 1e-9)
                 sigmoid = 1.0 / (1.0 + np.exp(-z))
                 delta = amplitude * sigmoid
+
+            elif drift_type == "exponential_growth":
+                rate = config.rate if config.rate is not None else 0.01
+                # y = x * (1 + rate)^t  => delta = x * ((1+rate)^t - 1)
+                # But here we apply delta + INITIAL values. 
+                # To be consistent with additive logic, we calculate delta from base
+                base_values = df_evolved[col].values
+                delta = base_values * ((1 + rate) ** t - 1)
+
+            elif drift_type == "decay":
+                rate = config.rate if config.rate is not None else 0.01
+                base_values = df_evolved[col].values
+                delta = base_values * ((1 - rate) ** t - 1)
+
+            elif drift_type == "step":
+                step_val = (
+                    config.step if config.step is not None else len(t) / 2
+                )
+                amplitude = (
+                    config.amplitude if config.amplitude is not None else 1.0
+                )
+                delta = np.where(t >= step_val, amplitude, 0.0)
+
+            elif drift_type == "noise":
+                scale = (
+                    config.noise_std
+                    if config.noise_std is not None
+                    else (config.amplitude if config.amplitude is not None else 1.0)
+                )
+                delta = self.rng.normal(0, scale, size=len(t))
+
+            elif drift_type == "random_walk":
+                step_std = (
+                    config.step_std if config.step_std is not None else 0.1
+                )
+                steps = self.rng.normal(0, step_std, size=len(t))
+                delta = np.cumsum(steps)
 
             # Apply delta
             # Assuming additive drift for now. Could add 'mode': 'multiplicative' later.

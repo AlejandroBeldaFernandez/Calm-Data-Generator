@@ -163,14 +163,13 @@ synthetic = gen.generate(
 
 
 
-# scVI - Variational Autoencoder for single-cell data
+# scVI - Variational Autoencoder for single-cell/RNA-seq data
 synthetic = gen.generate(
     expression_df, 1000,
     method='scvi',
-    target_col='cell_type',  # Optional metadata column
-    epochs=100,
-    n_latent=10,
-    n_layers=1
+    target_col='cell_type',  
+    use_scanvi=True,         # Better class separation
+    use_latent_sampling=True # Higher biological fidelity
 )
 
 
@@ -228,7 +227,8 @@ gen = ClinicalDataGenerator()
 # Define Drift (Optional)
 drift_age = DriftConfig(
     method="inject_feature_drift",
-    params={"feature_cols": ["Age"], "drift_magnitude": 0.5}
+    feature_cols=["Age"],
+    magnitude=0.5
 )
 
 result = gen.generate(
@@ -313,7 +313,8 @@ stream = synth.Agrawal(seed=42)
 # Define Drift
 drift_conf = DriftConfig(
     method="inject_feature_drift",
-    params={"feature_cols": ["salary"], "drift_magnitude": 0.5}
+    feature_cols=["salary"],
+    magnitude=0.5
 )
 
 synthetic = gen.generate(
@@ -368,13 +369,11 @@ injector = DriftInjector(time_col='timestamp')
 # Unified interface using DriftConfig objects
 drift_conf = DriftConfig(
     method="inject_feature_drift_gradual",
-    params={
-        "feature_cols": ['income', 'age'],
-        "drift_magnitude": 0.5,
-        "drift_type": "shift",
-        "center": 500,
-        "width": 200
-    }
+    feature_cols=['income', 'age'],
+    magnitude=0.5,
+    drift_type="shift",
+    center=500,
+    width=200
 )
 
 drifted = injector.inject_multiple_types_of_drift(
@@ -664,7 +663,7 @@ from calm_data_generator.generators.configs import DriftConfig
 gen = StreamBlockGenerator()
 
 # Define Drift per block (optional)
-drift_block2 = DriftConfig(method="inject_feature_drift", params={"drift_magnitude": 0.8})
+drift_block2 = DriftConfig(method="inject_feature_drift", magnitude=0.8)
 
 # Generate with scheduled concept drift
 gen.generate_blocks_simple(
@@ -710,6 +709,14 @@ calm_data_generator docs
 For issues and questions:
 - GitHub Issues: [https://github.com/AlejandroBeldaFernandez/Calm-Data_Generator/issues](https://github.com/AlejandroBeldaFernandez/Calm-Data_Generator/issues)
 - Email: alejandrobeldafernandez@gmail.com
+
+---
+
+## External Engine Documentation
+For advanced hyperparameter tuning and technical details of the underlying models, please refer to:
+- **Synthcity**: [Reference Manual](https://github.com/vanderschaarlab/synthcity)
+- **scvi-tools**: [User Guide](https://docs.scvi-tools.org/)
+- **GEARS**: [Implementation Details](https://github.com/snap-stanford/GEARS)
 
 ## Time Series Synthesis
 

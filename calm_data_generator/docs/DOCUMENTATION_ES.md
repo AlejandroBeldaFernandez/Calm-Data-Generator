@@ -1,5 +1,11 @@
 # Documentación de Calm Data Generator
 
+## Documentación de Motores Externos
+Para ajustes de hiperparámetros avanzados y detalles técnicos de los modelos subyacentes, por favor consulta:
+- **Synthcity**: [Manual de Referencia](https://github.com/vanderschaarlab/synthcity)
+- **scvi-tools**: [Guía de Usuario](https://docs.scvi-tools.org/)
+- **GEARS**: [Detalles de Implementación](https://github.com/snap-stanford/GEARS)
+
 Bienvenido a la documentación completa de **Calm Data Generator**. Esta guía cubre la instalación, configuración y uso avanzado de todos los módulos.
 
 > **Nota:** Para documentos de referencia de API específicos, ver:
@@ -88,7 +94,7 @@ synthetic_data = gen.generate(real_data, n_samples=1000, method='lgbm')
 | `tvae` | Variational Autoencoder (Synthcity) | A menudo más rápido y robusto que GANs para datos tabulares. |
 | `copula` | Gaussian Copula | Modela correlaciones multivariadas usando la librería `copulae`. |
 | `diffusion` | Difusión Tabular (DDPM) | Estado del arte experimental. Lento pero alta fidelidad. |
-| `scvi` | Single-Cell (Genómica) | Modelado biológico especializado para RNA-Seq. |
+| `scvi` | Single-Cell (Genómica) | Modelado biológico especializado para RNA-Seq (scVI/scANVI). |
 
 
 ### Configuración Avanzada (`**kwargs`)
@@ -105,6 +111,8 @@ Puedes pasar parámetros específicos al modelo subyacente a través de `**kwarg
 - `n_estimators`: Número de árboles.
 - `max_depth`: Profundidad máxima.
 - `balance_target`: `True` para reequilibrar clases antes de entrenar.
+- `use_scanvi`: `True` para usar scANVI y mejorar la separación de clases.
+- `use_latent_sampling`: `True` para mayor fidelidad biológica.
 
 ---
 
@@ -163,7 +171,7 @@ Permite modificar datasets existentes para introducir cambios estadísticos cont
 Usa `inject_drift()` para aplicar drift fácilmente a múltiples columnas sin preocuparte por sus tipos de datos.
 
 ```python
-injector.inject_drift(df, columns=['salary'], drift_mode='gradual', drift_magnitude=0.5)
+injector.inject_drift(df, columns=['salary'], drift_mode='gradual', magnitude=0.5)
 ```
 
 Ver [DRIFT_INJECTOR_REFERENCE_ES.md](./DRIFT_INJECTOR_REFERENCE_ES.md).

@@ -7,6 +7,53 @@ El `ClinicalDataGenerator` es un simulador de alta fidelidad para datasets sanit
 2.  **Datos Ómicos**: Expresión génica (RNA-Seq/Microarray) y proteínas, correlacionados con la demografía.
 3.  **Registros Longitudinales**: Trayectorias de visitas múltiples.
 
+
+---
+
+## Guía de Inicio Rápido
+
+### ¿Qué es ClinicalDataGenerator?
+
+Un generador especializado para **datos de investigación clínica/médica** que crea datasets multimodales realistas que incluyen:
+- 👥 **Demografía de Pacientes** (edad, género, IMC, etc.)
+- 🧬 **Datos Ómicos** (expresión génica, proteínas)
+- 📊 **Registros Longitudinales** (trayectorias de múltiples visitas)
+- 🌡️ **Efectos de Enfermedad** (biomarcadores, respuestas al tratamiento)
+
+### Cuándo usar ClinicalDataGenerator
+
+✅ **Usa ClinicalDataGenerator cuando:**
+- Necesites datos de **ensayos clínicos** o **investigación médica**
+- Trabajes con **datos ómicos** (RNA-Seq, Microarray, Proteómica)
+- Simules estudios de **enfermedad vs control**
+- Crees trayectorias de **pacientes longitudinales**
+- Pruebes algoritmos de **descubrimiento de biomarcadores**
+- Necesites **demografía correlacionada** (edad, IMC, presión arterial)
+
+❌ **No uses ClinicalDataGenerator cuando:**
+- Tengas **datos tabulares simples** → Usa `RealGenerator` en su lugar
+- Necesites datos sintéticos de **propósito general** → Usa `RealGenerator`
+- No necesites una estructura **multimodal** → Usa `RealGenerator`
+
+### Uso Básico (3 Líneas)
+
+```python
+from calm_data_generator.generators.clinical import ClinicalDataGenerator
+
+gen = ClinicalDataGenerator()
+data = gen.generate(n_samples=100, n_genes=500, n_proteins=200)
+# Retorna: {"demographics": DataFrame, "genes": DataFrame, "proteins": DataFrame}
+```
+
+### Casos de Uso Comunes
+
+| Escenario | Método | Parámetros Clave |
+|----------|--------|------------------|
+| **Cohorte estática** (punto temporal único) | `generate()` | `n_samples`, `n_genes`, `n_proteins` |
+| **Estudio longitudinal** (múltiples visitas) | `generate_longitudinal_data()` | `longitudinal_config` |
+| **Simulación de biomarcadores** (efectos de enfermedad) | `generate()` | `disease_effects_config` |
+| **Diversidad poblacional** (demografía correlacionada) | `generate()` | `demographic_correlations` |
+
 ---
 
 ## Inicialización
@@ -37,7 +84,7 @@ data = gen.generate(
     
     # Configuración de Drift (usando objetos DriftConfig)
     demographics_drift_config=[
-        DriftConfig(method="inject_feature_drift", params={"feature_cols": ["Age"], "drift_magnitude": 0.5})
+        DriftConfig(method="inject_feature_drift", feature_cols=["Age"], magnitude=0.5)
     ],
     
     # Configuraciones detalladas

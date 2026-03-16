@@ -26,6 +26,7 @@ from calm_data_generator.generators.tabular import RealGenerator, QualityReporte
 | `timegan` | TimeGAN (time series) |
 | `timevae` | TimeVAE (time series VAE) |
 | `fflows` | FourierFlows (periodic time series) |
+| `scvi` | scVI (Single-Cell VI) |
 
 
 
@@ -64,6 +65,7 @@ from calm_data_generator.generators.drift import DriftInjector
 ```
 
 **Drift Types:**
+- `inject_drift()` **(Unified)**
 - `inject_feature_drift_gradual()`
 - `inject_feature_drift_abrupt()`
 - `inject_feature_drift_recurrent()`
@@ -90,6 +92,21 @@ from calm_data_generator.generators.dynamics import ScenarioInjector
 - `evolve_features()` - Apply trends/cycles
 - `construct_target()` - Create target variables
 - `project_to_future_period()` - Future data
+
+---
+
+### privacy - Privacy Transformations (Integrated)
+
+Privacy features are integrated into the `QualityReporter`. You can assess privacy using:
+
+```python
+reporter.generate_comprehensive_report(..., privacy_check=True)
+```
+
+Or use standalone transformations for manual protection:
+- `pseudonymize_columns`
+- `add_laplace_noise`
+- `shuffle_columns`
 
 ---
 

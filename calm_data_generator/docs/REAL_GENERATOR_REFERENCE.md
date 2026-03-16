@@ -29,6 +29,12 @@ gen = RealGenerator(
 | `logger` | Logger | `None` | Custom Python Logger instance |
 | `verbose_training` | bool | `False` | Show Synthcity epoch-by-epoch loss in console during training. Useful for models like TVAE or CTGAN where `get_training_history()` is not available. |
 
+> [!TIP]
+> This library acts as a high-level wrapper. For advanced hyperparameter tuning and deep architectural details, we highly recommend consulting the documentation of the original engines:
+> - **Synthcity** (CTGAN, TVAE, DDPM, TimeGAN, FF): [Synthcity Docs](https://github.com/vanderschaarlab/synthcity)
+> - **scvi-tools** (scVI, scANVI): [scvi-tools Docs](https://docs.scvi-tools.org/)
+> - **GEARS**: [GEARS GitHub](https://github.com/snap-stanford/GEARS)
+
 
 
 ---
@@ -85,6 +91,10 @@ synthetic_df = gen.generate(
 | `model_params` | Dict | `None` | Model-specific hyperparameters (passed as `**kwargs`) |
 | `constraints` | List[Dict] | `None` | Integrity constraints |
 | `adversarial_validation` | bool | `False` | Activate Discriminator Report (Real vs Synthetic) |
+| `report_config` | ReportConfig | `None` | Advanced reporting configuration object |
+| `date_config` | DateConfig | `None` | Advanced date injection configuration object |
+| `balance_target` | bool | `False` | Automatically balance class distribution in `target_col` |
+| `**kwargs` | Any | - | Method-specific parameters (e.g., `epochs`, `n_latent`, `lr`) |
 
 ---
 
@@ -101,7 +111,7 @@ The `model_params` dictionary allows fine-tuning internal parameters for each sy
 | `n_units_conditional` | `ctgan`, `tvae` | Number of units in conditional layers |
 | `n_units_in` | `ctgan`, `tvae` | Number of units in input layers |
 | `lr` | `ctgan`, `tvae` | Learning rate |
-| `differentiation_factor` | `ctgan`, `tvae`, `scvi` | *(v1.2.0)* Shift class centroids apart in latent/feature space. `0.0` = no shift, `1.0` = moderate, `2.0+` = strong separation |
+| `differentiation_factor` | `ctgan`, `tvae`, `scvi` | *(v1.2.0)* Shift class centroids apart in latent space. Uses **intelligent adaptive clamping** and **radial expansion** to ensure stable separation even at high factors (e.g. 10.0) without breaking decoding quality. |
 
 **Example:**
 ```python
@@ -355,27 +365,23 @@ synthetic = gen.generate(
     n_layers: 1,
 )
 # Returns pd.DataFrame with gene columns + metadata
-```
-
-| Parameter | Default | Description |
+```| Parameter | Default | Description |
 |-----------|---------|-------------|
 | `epochs` | 100 | Training epochs |
 | `n_latent` | 10 | Latent space dimensionality |
 | `n_layers` | 1 | Number of hidden layers |
+| `differentiation_factor` | 0.0 | Latent separation factor. Higher values (1.0-10.0) push classes apart in the latent space to create more separable synthetic data. |
+| `use_scanvi` | False | If True, uses the semi-supervised scANVI model. Recommended when you have labels (`target_col`) as it provides much better class separation than standard scVI. |
+| `use_latent_sampling` | True | Controls generation fidelity. If True, it samples from real data "anchors" to preserve patient-specific textures. If False, it samples from a random normal distribution (pure synthesis). |
+| `preserve_library_size` | True | If True, the generated cells will have total count (library size) distributions similar to the original data. Crucial for RNA-seq realism. |
+| `latent_noise_std` | 0.05 | Noise magnitude for latent space sampling (higher = more diversity, lower = more fidelity). |
+| `use_contrastivevi` | False | *(Advanced)* Uses ContrastiveVI to separate "salient" (disease-specific) variation from background noise. Requires `contrastive_vi` package. |
 
-
+> [!TIP]
 > **AnnData Support:** When passing `AnnData`, the object is used directly without conversion, preserving the original structure. The output is always a `pd.DataFrame` containing both the gene expression and the observations metadata.
 
 
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `epochs` | 100 | Training epochs |
-| `n_latent` | 10 | Latent space dimensionality |
-| `condition_col` | None | Column with condition/batch labels (required) |
-| `noise_scale` | 0.1 | Noise for sample diversity |
-
-.
+---
 
 ---
 

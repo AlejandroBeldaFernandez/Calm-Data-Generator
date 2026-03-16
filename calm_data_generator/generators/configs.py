@@ -62,6 +62,15 @@ class EvolutionFeatureConfig(BaseModel):
     phase: Optional[float] = 0.0
     center: Optional[float] = None
     width: Optional[float] = None
+    
+    # Extra parameters for specific evolution types
+    rate: Optional[float] = None      # for exponential_growth, decay
+    noise_std: Optional[float] = None # for noise
+    step_std: Optional[float] = None  # for random_walk
+    step: Optional[float] = None      # for step
+    value: Optional[float] = None     # for step
+    
+    model_config = ConfigDict(extra="allow")  # Allow extra fields for flexibility
 
 
 class ScenarioConfig(BaseModel):
