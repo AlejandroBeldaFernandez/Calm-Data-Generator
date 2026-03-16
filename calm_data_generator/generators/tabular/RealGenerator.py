@@ -803,7 +803,7 @@ class RealGenerator(BaseGenerator):
         differentiation_factor: float,
     ) -> Any:
         """
-        Calculates and applies a radial shift to latent embeddings to increase separability.
+        Calculates and applies a shift to latent embeddings to increase separability.
         Internal method that handles both PyTorch Tensors (TVAE) and NumPy Arrays (scVI).
         """
         import torch
@@ -821,63 +821,83 @@ class RealGenerator(BaseGenerator):
             self.logger.warning(f"Shape mismatch: embeddings({len(embeddings)}) vs labels({len(labels)}). Skipping shift.")
             return embeddings
 
-        unique_classes = np.unique(labels)
-        if len(unique_classes) < 2:
+        unique_labels = np.unique(labels)
+        if len(unique_labels) < 2:
             return embeddings
 
         # 1. Global centroid and Manifold Scale
         global_centroid = emb_tensor.mean(dim=0)
-        
-        # Calculate spread/radius of the manifold relative to its center
-        # This is more robust than distance to the absolute origin [0,0]
         centered_emb = emb_tensor - global_centroid
         avg_radius = torch.norm(centered_emb, dim=1).mean().item()
         avg_radius = max(avg_radius, 0.5) # Avoid division by zero
         
         # 2. Intelligent Adaptive Clamping
-        # Scale max_shift by dimension sqrt(D) and manifold scale
+        # Scale max_shift by dimension sqrt(D).
+        # We increase the factor to allow "extreme" separation if requested.
         n_latent = emb_tensor.shape[1]
         base_limit = math.sqrt(n_latent) * 2.0 
-        max_allowed_shift = min(base_limit * 2.0, avg_radius * 4.0) 
+        
+        # If factor is very high, we allow larger shifts (Extreme mode)
+        limit_multiplier = 4.0 if differentiation_factor < 10 else (differentiation_factor / 2.0)
+        max_allowed_shift = min(base_limit * limit_multiplier, avg_radius * limit_multiplier * 2.0) 
         
         self.logger.info(
             f"Latent Shift: Factor={differentiation_factor}, "
-            f"Limit={max_allowed_shift:.2f}, LatentDim={n_latent}"
+            f"Limit={max_allowed_shift:.2f}, LatentDim={n_latent}, Radius={avg_radius:.2f}"
         )
 
         new_embeddings = emb_tensor.clone().to(device)
-        labels_tensor = torch.from_numpy(labels).to(device) if not is_numpy else labels
+        
+        # 3. Apply shifts
+        # Case A: Binary classification (More stable class-vs-class axis)
+        if len(unique_labels) == 2:
+            mask0 = (labels == unique_labels[0])
+            mask1 = (labels == unique_labels[1])
+            
+            c0 = emb_tensor[mask0].mean(dim=0).to(device)
+            c1 = emb_tensor[mask1].mean(dim=0).to(device)
+            
+            # Vector from 0 to 1
+            distance_vector = c1 - c0
+            dist_norm = torch.norm(distance_vector)
+            
+            if dist_norm > 1e-6:
+                # Calculate shift magnitude with tanh protection
+                # We divide by 2 to move each class symmetrically
+                raw_shift_norm = (differentiation_factor / 2.0) * dist_norm
+                dampening = torch.tanh(raw_shift_norm / max_allowed_shift)
+                actual_shift_mag = max_allowed_shift * dampening
+                
+                unit_vec = distance_vector / dist_norm
+                shift_vec = unit_vec * actual_shift_mag
+                
+                # Move AWAY from each other along the axis
+                # c1 moves in direction of vector, c0 moves opposite
+                new_embeddings[mask1] += shift_vec
+                new_embeddings[mask0] -= shift_vec
+                self.logger.info(f"Binary shift applied: magnitude {actual_shift_mag:.2f}")
 
-        # 3. Apply radial shifts per class
-        for cls in unique_classes:
-            mask = (labels == cls) # Boolean mask
-            if not np.any(mask):
-                continue
+        # Case B: Multi-class (Radial shift from global center)
+        else:
+            for cls in unique_labels:
+                mask = (labels == cls)
+                if not np.any(mask):
+                    continue
+                    
+                class_centroid = emb_tensor[mask].mean(dim=0).to(device)
+                direction = class_centroid - global_centroid.to(device)
                 
-            class_centroid = emb_tensor[mask].mean(dim=0).to(device)
-            direction = class_centroid - global_centroid.to(device)
-            
-            dist_norm = torch.norm(direction)
-            if dist_norm < 1e-6:
-                continue # Classes are already perfectly overlapped at the center
-            
-            # Initial raw shift
-            raw_shift_vector = differentiation_factor * direction
-            raw_shift_norm = torch.norm(raw_shift_vector)
-            
-            # 4. Soft-clamping (Tanh)
-            # This ensures that higher differentiation_factor still produces 
-            # more separation than lower ones, but at a decreasing rate.
-            if raw_shift_norm < 1e-9:
-                continue
+                dist_norm = torch.norm(direction)
+                if dist_norm < 1e-6:
+                    continue
                 
-            dampening = torch.tanh(raw_shift_norm / max_allowed_shift)
-            intelligent_shift = (raw_shift_vector / raw_shift_norm) * (max_allowed_shift * dampening)
-            
-            # Apply to all samples of this class
-            # mask can be used directly on torch tensors
-            new_embeddings[mask] += intelligent_shift
+                raw_shift_norm = differentiation_factor * dist_norm
+                dampening = torch.tanh(raw_shift_norm / max_allowed_shift)
+                actual_shift_mag = max_allowed_shift * dampening
                 
+                shift_vec = (direction / dist_norm) * actual_shift_mag
+                new_embeddings[mask] += shift_vec
+
         if is_numpy:
             return new_embeddings.detach().cpu().numpy()
         return new_embeddings
