@@ -2070,10 +2070,26 @@ class RealGenerator(BaseGenerator):
                     ).unsqueeze(1).to(scanvi_model.device)
 
                     batch_index = torch.zeros(len(indices), 1, dtype=torch.long).to(scanvi_model.device)
+                    
+                    # Handle labels for gene-label dispersion
+                    y_tensor = None
+                    if getattr(scanvi_model.module, "dispersion", "gene") == "gene-label":
+                        try:
+                            label_registry = scanvi_model.adata_manager.get_state_registry("labels")
+                            cat_mapping = label_registry.categorical_mapping
+                            label_map = {str(cat): i for i, cat in enumerate(cat_mapping)}
+                            y_tensor = torch.tensor(
+                                [label_map[str(m)] for m in synthetic_metadata], 
+                                dtype=torch.long
+                            ).unsqueeze(1).to(scanvi_model.device)
+                        except Exception as e:
+                            self.logger.warning(f"Could not map labels for gene-label dispersion (scANVI): {e}")
+
                     gen_outputs = scanvi_model.module.generative(
                         z=latent_tensor,
                         library=library_tensor,
                         batch_index=batch_index,
+                        y=y_tensor,
                     )
                     px_dist = gen_outputs["px"]
                     try:
@@ -2159,11 +2175,27 @@ class RealGenerator(BaseGenerator):
                         
                         background_tensor = torch.zeros_like(latent_tensor).to(contrastive_model.device)
                         batch_index = torch.zeros(n_samples, 1, dtype=torch.long).to(contrastive_model.device)
+                        
+                        # Handle labels for gene-label dispersion
+                        y_tensor = None
+                        if getattr(contrastive_model.module, "dispersion", "gene") == "gene-label":
+                            try:
+                                label_registry = contrastive_model.adata_manager.get_state_registry("labels")
+                                cat_mapping = label_registry.categorical_mapping
+                                label_map = {str(cat): i for i, cat in enumerate(cat_mapping)}
+                                y_tensor = torch.tensor(
+                                    [label_map[str(m)] for m in synthetic_metadata], 
+                                    dtype=torch.long
+                                ).unsqueeze(1).to(contrastive_model.device)
+                            except Exception as e:
+                                self.logger.warning(f"Could not map labels for gene-label dispersion (ContrastiveVI): {e}")
+
                         gen_outputs = contrastive_model.module.generative(
                             z=latent_tensor,
                             z_bg=background_tensor,
                             library=library_tensor,
                             batch_index=batch_index,
+                            y=y_tensor,
                         )
                         px_dist = gen_outputs["px"]
                         try:
@@ -2260,10 +2292,26 @@ class RealGenerator(BaseGenerator):
                 ).to(model.device)
 
             batch_index = torch.zeros(n_samples, 1, dtype=torch.long).to(model.device)
+            
+            # Handle labels for gene-label dispersion
+            y_tensor = None
+            if getattr(model.module, "dispersion", "gene") == "gene-label":
+                try:
+                    label_registry = model.adata_manager.get_state_registry("labels")
+                    cat_mapping = label_registry.categorical_mapping
+                    label_map = {str(cat): i for i, cat in enumerate(cat_mapping)}
+                    y_tensor = torch.tensor(
+                        [label_map[str(m)] for m in synthetic_metadata], 
+                        dtype=torch.long
+                    ).unsqueeze(1).to(model.device)
+                except Exception as e:
+                    self.logger.warning(f"Could not map labels for gene-label dispersion (scVI): {e}")
+
             generative_outputs = model.module.generative(
                 z=latent_tensor,
                 library=library_tensor,
                 batch_index=batch_index,
+                y=y_tensor,
             )
 
             # Sample from the distribution
