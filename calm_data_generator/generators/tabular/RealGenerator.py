@@ -733,26 +733,14 @@ class RealGenerator(BaseGenerator):
         self._patch_synthcity_encoder()  # Apply patch
         if "epochs" in model_kwargs:
             model_kwargs["n_iter"] = model_kwargs.pop("epochs")
-        differentiation_factor = model_kwargs.pop("differentiation_factor", 0.0)
-     
-
         syn = self._get_synthesizer("ctgan", **model_kwargs)
         syn.fit(data)
         self.synthesizer = syn
         self.method = "ctgan"
         self.metadata = {"columns": data.columns.tolist()}
         
-        if differentiation_factor > 0.0 and target_col and target_col in data.columns:
-            synth_df = self._apply_latent_differentiation(
-                syn=syn,
-                data=data,
-                n_samples=n_samples,
-                target_col=target_col,
-                differentiation_factor=differentiation_factor,
-                method="ctgan"
-            )
-        else:
-            synth_df = syn.generate(count=n_samples).dataframe()
+        # CTGAN does not support latent differentiation (no encoder by default)
+        synth_df = syn.generate(count=n_samples).dataframe()
 
         return synth_df
 
@@ -770,6 +758,8 @@ class RealGenerator(BaseGenerator):
         if "epochs" in model_kwargs:
             model_kwargs["n_iter"] = model_kwargs.pop("epochs")
         differentiation_factor = model_kwargs.pop("differentiation_factor", 0.0)
+        clipping_mode = model_kwargs.pop("clipping_mode", "strict")
+        clipping_factor = model_kwargs.pop("clipping_factor", 0.1)
 
         syn = self._get_synthesizer("tvae", **model_kwargs)
         try:
@@ -783,229 +773,192 @@ class RealGenerator(BaseGenerator):
         self.metadata = {"columns": data.columns.tolist()}
 
         if differentiation_factor > 0.0 and target_col and target_col in data.columns:
-            synth_df = self._apply_latent_differentiation(
+            synth_df = self._apply_unified_latent_differentiation(
                 syn=syn,
                 data=data,
                 n_samples=n_samples,
                 target_col=target_col,
                 differentiation_factor=differentiation_factor,
-                method="tvae"
+                method="tvae",
+                clipping_mode=clipping_mode,
+                clipping_factor=clipping_factor,
+                **model_kwargs
             )
         else:
             synth_df = syn.generate(count=n_samples).dataframe()
 
-        return synth_df  
+        return synth_df
 
-    def _perform_latent_shift(
-        self,
-        embeddings: Any,
-        labels: np.ndarray,
-        differentiation_factor: float,
-    ) -> Any:
-        """
-        Calculates and applies a shift to latent embeddings to increase separability.
-        Internal method that handles both PyTorch Tensors (TVAE) and NumPy Arrays (scVI).
-        """
-        import torch
-        
-        is_numpy = isinstance(embeddings, np.ndarray)
-        if is_numpy:
-            device = "cpu"
-            # Ensure float32 for torch
-            emb_tensor = torch.from_numpy(embeddings.astype(np.float32))
-        else:
-            device = embeddings.device
-            emb_tensor = embeddings
-
-        if len(embeddings) != len(labels):
-            self.logger.warning(f"Shape mismatch: embeddings({len(embeddings)}) vs labels({len(labels)}). Skipping shift.")
-            return embeddings
-
-        unique_labels = np.unique(labels)
-        if len(unique_labels) < 2:
-            return embeddings
-
-        # 1. Global centroid and Manifold Scale
-        global_centroid = emb_tensor.mean(dim=0)
-        centered_emb = emb_tensor - global_centroid
-        avg_radius = torch.norm(centered_emb, dim=1).mean().item()
-        avg_radius = max(avg_radius, 0.5) # Avoid division by zero
-        
-        # 2. Intelligent Adaptive Clamping
-        # Scale max_shift by dimension sqrt(D).
-        # We increase the factor to allow "extreme" separation if requested.
-        n_latent = emb_tensor.shape[1]
-        base_limit = math.sqrt(n_latent) * 2.0 
-        
-        # If factor is very high, we allow larger shifts (Extreme mode)
-        limit_multiplier = 4.0 if differentiation_factor < 10 else (differentiation_factor / 2.0)
-        max_allowed_shift = min(base_limit * limit_multiplier, avg_radius * limit_multiplier * 2.0) 
-        
-        self.logger.info(
-            f"Latent Shift: Factor={differentiation_factor}, "
-            f"Limit={max_allowed_shift:.2f}, LatentDim={n_latent}, Radius={avg_radius:.2f}"
-        )
-
-        new_embeddings = emb_tensor.clone().to(device)
-        
-        # 3. Apply shifts
-        # Case A: Binary classification (More stable class-vs-class axis)
-        if len(unique_labels) == 2:
-            mask0 = (labels == unique_labels[0])
-            mask1 = (labels == unique_labels[1])
-            
-            c0 = emb_tensor[mask0].mean(dim=0).to(device)
-            c1 = emb_tensor[mask1].mean(dim=0).to(device)
-            
-            # Vector from 0 to 1
-            distance_vector = c1 - c0
-            dist_norm = torch.norm(distance_vector)
-            
-            if dist_norm > 1e-6:
-                # Calculate shift magnitude with tanh protection
-                # We divide by 2 to move each class symmetrically
-                raw_shift_norm = (differentiation_factor / 2.0) * dist_norm
-                dampening = torch.tanh(raw_shift_norm / max_allowed_shift)
-                actual_shift_mag = max_allowed_shift * dampening
-                
-                unit_vec = distance_vector / dist_norm
-                shift_vec = unit_vec * actual_shift_mag
-                
-                # Move AWAY from each other along the axis
-                # c1 moves in direction of vector, c0 moves opposite
-                new_embeddings[mask1] += shift_vec
-                new_embeddings[mask0] -= shift_vec
-                self.logger.info(f"Binary shift applied: magnitude {actual_shift_mag:.2f}")
-
-        # Case B: Multi-class (Radial shift from global center)
-        else:
-            for cls in unique_labels:
-                mask = (labels == cls)
-                if not np.any(mask):
-                    continue
-                    
-                class_centroid = emb_tensor[mask].mean(dim=0).to(device)
-                direction = class_centroid - global_centroid.to(device)
-                
-                dist_norm = torch.norm(direction)
-                if dist_norm < 1e-6:
-                    continue
-                
-                raw_shift_norm = differentiation_factor * dist_norm
-                dampening = torch.tanh(raw_shift_norm / max_allowed_shift)
-                actual_shift_mag = max_allowed_shift * dampening
-                
-                shift_vec = (direction / dist_norm) * actual_shift_mag
-                new_embeddings[mask] += shift_vec
-
-        if is_numpy:
-            return new_embeddings.detach().cpu().numpy()
-        return new_embeddings
-
-    def _apply_latent_differentiation(
+    def _apply_unified_latent_differentiation(
         self,
         syn: Any,
         data: pd.DataFrame,
         n_samples: int,
         target_col: str,
         differentiation_factor: float,
-        method: str
+        method: str,
+        **kwargs
     ) -> pd.DataFrame:
-        """Applies differentiation directly in the latent space by shifting embeddings."""
-        import torch
-        self.logger.info(f"Applying latent space differentiation (factor: {differentiation_factor}) for {method}...")
+        """
+        Unified implementation of latent space differentiation for TVAE and scVI.
         
+        Follows a 5-step process:
+        1. Generate latent space z(d) for samples.
+        2. Calculate centers of mass (centroids) for cases (cmca) and controls (cmco).
+        3. Calculate distance vector c = cmca - cmco (for case) or c = cmco - cmca (for control).
+        4. Generate synthetic latent z'(d) = z(d) + a * c.
+        5. Decode z'(d) and apply flexible clipping.
+        """
+        import torch
+        import numpy as np
+        self.logger.info(f"Applying unified latent differentiation for {method} (factor: {differentiation_factor})")
+        
+        clipping_mode = kwargs.get("clipping_mode", "strict")
+        clipping_factor = kwargs.get("clipping_factor", 0.1)
+
         try:
-            # Depending on the generator, accessing the latent space is different
+            # Step 1: Generate Latent Space z(d)
             if method == "tvae":
-                tabular_model = syn.model   # TabularVAE (contains TabularEncoder + inner VAE)
-                pytorch_model = tabular_model.model  # Inner VAE (neural network)
+                tabular_model = syn.model
+                pytorch_model = tabular_model.model
                 pytorch_model.eval()
                 
-                # The TabularVAE was trained with the full data including the target column.
-                # We must encode the full data (same columns as training) so the output shape matches.
                 data_encoded = tabular_model.encode(data)
-                
                 data_tensor = torch.tensor(data_encoded.values, dtype=torch.float32).to(pytorch_model.device)
-                # encoder returns (mu, logvar)
+                
                 unique_classes = data[target_col].unique()
-                cond_labels = (data[target_col] == unique_classes[1]).astype(int).values
+                if len(unique_classes) != 2:
+                    self.logger.warning(f"Differentiation works best with 2 classes, found {len(unique_classes)}. Using first two.")
+                
+                control_val = unique_classes[0]
+                case_val = unique_classes[1]
+                
+                cond_labels = (data[target_col] == case_val).astype(int).values
                 cond_tensor = torch.nn.functional.one_hot(
                     torch.tensor(cond_labels), num_classes=2
                 ).float().to(pytorch_model.device)
                 
-                # Sumamos las 2002 dimensiones + 2 del condicional = 2004
                 input_tensor = torch.cat([data_tensor, cond_tensor], dim=1)
                 with torch.no_grad():
-                   
                     encoder_out = pytorch_model.encoder(input_tensor)
-                    if isinstance(encoder_out, (tuple, list)):
-                        mu, logvar = encoder_out[0], encoder_out[1]
-                    else:
-                        mu = encoder_out
-                        logvar = torch.zeros_like(mu)
-                    # Use mu directly (deterministic) for stable shifting
-                    embeddings = mu
-                    
-            elif method == "ctgan":
-                self.logger.warning(
-                    "differentiation_factor is not supported for ctgan (GAN architecture has no encoder). "
-                    "Generating without latent shift."
-                )
-                return syn.generate(count=n_samples).dataframe()
+                    mu = encoder_out[0] if isinstance(encoder_out, (tuple, list)) else encoder_out
+                    z = mu
                 
+            elif method == "scvi":
+                model = syn
+                z = torch.tensor(model.get_latent_representation(), dtype=torch.float32).to(model.device)
+                unique_classes = data[target_col].unique()
+                control_val = unique_classes[0]
+                case_val = unique_classes[1]
             else:
-                self.logger.warning(
-                    f"differentiation_factor is not supported for {method}. Generating without latent shift."
-                )
                 return syn.generate(count=n_samples).dataframe()
 
-           
-            # Apply unified latent shift
+            # Step 2: Calculate Centroids
             labels = data[target_col].values
-            embeddings = self._perform_latent_shift(
-                embeddings=embeddings,
-                labels=labels,
-                differentiation_factor=differentiation_factor
-            )
-            self.latest_embeddings = embeddings.cpu().numpy() if hasattr(embeddings, "cpu") else embeddings
-                
-            # Decode back
+            mask_case = (labels == str(case_val)) if method == "scvi" else (labels == case_val)
+            mask_control = (labels == str(control_val)) if method == "scvi" else (labels == control_val)
             
+            cmca = z[mask_case].mean(dim=0)
+            cmco = z[mask_control].mean(dim=0)
+            
+            if torch.isnan(cmca).any() or torch.isnan(cmco).any():
+                self.logger.warning("Centroid calculation returned NaNs. Skipping differentiation.")
+                return syn.generate(count=n_samples).dataframe()
+
+            # Step 3 & 4: Calculate Distance Vector and Enhance Latent Space
+            z_prime = z.clone()
+            z_prime[mask_case] += differentiation_factor * (cmca - cmco)
+            z_prime[mask_control] += differentiation_factor * (cmco - cmca)
+            
+            # Step 5: Decode
             if method == "tvae":
                 with torch.no_grad():
-                    # --- CONCATENAR LA CONDICIÓN PARA EL DECODER ---
-                    # embeddings tiene la dimensión latente (ej. 128)
-                    # cond_tensor tiene la dimensión de las clases (2)
-                    decoder_input = torch.cat([embeddings, cond_tensor], dim=1)
-                    
-                    # Pasamos el tensor combinado al decoder
+                    decoder_input = torch.cat([z_prime, cond_tensor], dim=1)
                     reconstructed_tensor = pytorch_model.decoder(decoder_input)
-                    
+                
                 reconstructed_df = pd.DataFrame(
                     reconstructed_tensor.cpu().numpy(),
                     columns=data_encoded.columns
                 )
                 synth_df = syn.model.decode(reconstructed_df)
+                synth_df[target_col] = data[target_col].values
                 
-            # Adjust size
+            elif method == "scvi":
+                with torch.no_grad():
+                    # Preserve library size logic
+                    if hasattr(data, "X"):
+                        if hasattr(data.X, "toarray"):
+                            orig_lib_size = np.sum(data.X.toarray(), axis=1)
+                        else:
+                            orig_lib_size = np.sum(data.X, axis=1)
+                        if hasattr(orig_lib_size, "A1"):
+                            orig_lib_size = orig_lib_size.A1
+                        orig_log_lib = np.log(orig_lib_size + 1e-8)
+                    else:
+                        orig_log_lib = np.zeros(len(data))
+                    
+                    library_tensor = torch.tensor(orig_log_lib, dtype=torch.float32).unsqueeze(1).to(model.device)
+                    batch_index = torch.zeros(len(z), 1, dtype=torch.long).to(model.device)
+                    
+                    y_tensor = None
+                    if getattr(model.module, "dispersion", "gene") == "gene-label":
+                        label_registry = model.adata_manager.get_state_registry("labels")
+                        cat_mapping = label_registry.categorical_mapping
+                        label_map = {str(cat): i for i, cat in enumerate(cat_mapping)}
+                        y_tensor = torch.tensor(
+                            [label_map[str(m)] for m in labels], 
+                            dtype=torch.long
+                        ).unsqueeze(1).to(model.device)
+
+                    gen_outputs = model.module.generative(
+                        z=z_prime,
+                        library=library_tensor,
+                        batch_index=batch_index,
+                        y=y_tensor,
+                    )
+                    px_dist = gen_outputs["px"]
+                    synth_values = px_dist.sample().cpu().numpy() if hasattr(px_dist, "sample") else px_dist.mean.cpu().numpy()
+                
+                # Use var_names from adata if possible, or columns from data
+                col_names = data.var_names if hasattr(data, "var_names") else [c for c in data.columns if c != target_col]
+                synth_df = pd.DataFrame(synth_values, columns=col_names)
+                synth_df[target_col] = labels
+
+            # Sample/Match size
             if len(synth_df) != n_samples:
-                synth_df = synth_df.sample(n=n_samples, replace=(n_samples > len(synth_df)), random_state=self.random_state).reset_index(drop=True)
-                
-            # Clip bounds
-            numeric_cols = synth_df.select_dtypes(include=[np.number]).columns
-            for col in numeric_cols:
-                if col in data.columns:
-                    orig_min = data[col].min()
-                    orig_max = data[col].max()
-                    synth_df[col] = synth_df[col].clip(lower=orig_min, upper=orig_max)
-                    if pd.api.types.is_integer_dtype(data[col]):
-                        synth_df[col] = synth_df[col].round().astype(int)
+                synth_df = synth_df.sample(
+                    n=n_samples, 
+                    replace=(n_samples > len(synth_df)), 
+                    random_state=self.random_state
+                ).reset_index(drop=True)
+
+            # Flexible Clipping and Integer Preservation
+            if clipping_mode != "none":
+                numeric_cols = synth_df.select_dtypes(include=[np.number]).columns
+                for col in numeric_cols:
+                    if col in data.columns:
+                        orig_min = data[col].min()
+                        orig_max = data[col].max()
+                        
+                        if clipping_mode == "strict":
+                            low, high = orig_min, orig_max
+                        else:  # permissive
+                            col_range = orig_max - orig_min
+                            low = orig_min - (clipping_factor * col_range)
+                            high = orig_max + (clipping_factor * col_range)
+                        
+                        synth_df[col] = synth_df[col].clip(lower=low, upper=high)
+                        
+                        if pd.api.types.is_integer_dtype(data[col]):
+                            synth_df[col] = synth_df[col].round().astype(int)
 
             return synth_df
 
         except Exception as e:
-            self.logger.error(f"Error during latent differentiation for {method}: {e}. Generating without latent shift.")
+            self.logger.error(f"Unified differentiation failed for {method}: {e}")
+            if method == "scvi":
+                # scVI doesn't have a direct .generate() on the model, return None to signal failure
+                return None
             return syn.generate(count=n_samples).dataframe()
 
 
@@ -1875,6 +1828,10 @@ class RealGenerator(BaseGenerator):
         self.logger.info("Starting scVI synthesis for single-cell data...")
         self.logger.debug(f"Entering _synthesize_scvi with data type: {type(data)}")
 
+        differentiation_factor = kwargs.pop("differentiation_factor", 0.0)
+        clipping_mode = kwargs.pop("clipping_mode", "strict")
+        clipping_factor = kwargs.pop("clipping_factor", 0.1)
+
         try:
             import anndata
             import scvi
@@ -1891,11 +1848,14 @@ class RealGenerator(BaseGenerator):
             and not isinstance(data, pd.DataFrame)
         ):
             adata = data
-            # Ensure target_col is in obs if provided
-            if target_col and target_col not in adata.obs.columns:
-                self.logger.warning(
-                    f"target_col '{target_col}' not found in AnnData.obs."
-                )
+            # Ensure target_col is in obs if provided and is string
+            if target_col:
+                if target_col not in adata.obs.columns:
+                    self.logger.warning(
+                        f"target_col '{target_col}' not found in AnnData.obs."
+                    )
+                else:
+                    adata.obs[target_col] = adata.obs[target_col].astype(str)
         else:
             # Separate metadata from expression data
             metadata_cols = []
@@ -1917,9 +1877,14 @@ class RealGenerator(BaseGenerator):
             # Add metadata to obs if present
             if metadata_cols:
                 for col in metadata_cols:
-                    adata.obs[col] = data[col].values
+                    if col == target_col:
+                        # Ensure labels are always strings from the start to maintain registry consistency
+                        adata.obs[col] = data[col].astype(str).values
+                    else:
+                        adata.obs[col] = data[col].values
 
         # Separate parameters for model initialization and training
+        n_latent = kwargs.get("n_latent", 30)
         model_setup_params = [
             "n_hidden", "n_latent", "n_layers", "dropout_rate", 
             "dispersion", "gene_likelihood", "use_observed_lib_size", 
@@ -1927,7 +1892,7 @@ class RealGenerator(BaseGenerator):
         ]
         
         model_init_kwargs = {
-            "n_latent": kwargs.get("n_latent", 30),
+            "n_latent": n_latent,
             "n_layers": kwargs.get("n_layers", 1),
         }
         
@@ -1937,7 +1902,9 @@ class RealGenerator(BaseGenerator):
                 model_init_kwargs[param] = kwargs[param]
 
         # Use target_col for dispersion if provided and not explicitly overridden
-        if target_col and "dispersion" not in model_init_kwargs:
+        # CRITICAL: If use_scanvi is True, we keep scVI unsupervised to avoid size mismatches
+        use_scanvi = kwargs.get("use_scanvi", False)
+        if target_col and not use_scanvi and "dispersion" not in model_init_kwargs:
             model_init_kwargs["dispersion"] = "gene-label"
 
         # Work on a copy of adata to avoid modifying the original if passed
@@ -1952,9 +1919,12 @@ class RealGenerator(BaseGenerator):
             adata_to_train = adata
 
         # Setup and train scVI model
-        if target_col and target_col in adata_to_train.obs.columns:
+        # CRITICAL: If scANVI is requested, base scVI MUST be unsupervised (no labels_key)
+        if target_col and target_col in adata_to_train.obs.columns and not use_scanvi:
+            self.logger.info(f"Setting up supervised scVI with labels: {target_col}")
             scvi.model.SCVI.setup_anndata(adata_to_train, labels_key=target_col)
         else:
+            self.logger.info("Setting up unsupervised scVI base...")
             scvi.model.SCVI.setup_anndata(adata_to_train)
             
         model = scvi.model.SCVI(adata_to_train, **model_init_kwargs)
@@ -1978,6 +1948,12 @@ class RealGenerator(BaseGenerator):
             "early_stopping": early_stopping,
         }
         
+        # Add early_stopping_patience if provided in kwargs
+        if "early_stopping_patience" in kwargs:
+            train_kwargs["early_stopping_patience"] = kwargs["early_stopping_patience"]
+        if "check_val_every_n_epoch" in kwargs:
+            train_kwargs["check_val_every_n_epoch"] = kwargs["check_val_every_n_epoch"]
+        
         # Add any user-provided parameters that match scVI training signature
         for param in train_params:
             if param in kwargs:
@@ -1985,7 +1961,7 @@ class RealGenerator(BaseGenerator):
         
         # Generation-specific parameters that should NEVER go to model.init or model.train
         gen_params = [
-            "differentiation_factor", "latent_noise_std", "use_scanvi", 
+            "differentiation_factor", "use_scanvi", 
             "use_contrastivevi", "scanvi_epochs", "scanvi_unlabeled_category",
             "use_latent_sampling", "preserve_library_size", "epochs", "max_epochs"
         ]
@@ -2006,284 +1982,45 @@ class RealGenerator(BaseGenerator):
             return None
 
         model.module.eval()  # Ensure model is in eval mode for generation
-
-        # Check for advanced generation modes
-        use_scanvi = kwargs.get("use_scanvi", False)
-        use_contrastivevi = kwargs.get("use_contrastivevi", False)
-
-        # --- scANVI Branch ---
-        # scANVI is a semi-supervised model that learns condition-aware latent representations.
-        # It starts from a trained SCVI model and fine-tunes with label supervision.
-        if use_scanvi and target_col and target_col in adata_to_train.obs.columns:
-            self.logger.info("Initializing scANVI from trained scVI model...")
-            try:
-                scanvi_epochs = kwargs.get("scanvi_epochs", max(5, epochs // 5))
-                unlabeled_cat = kwargs.get("scanvi_unlabeled_category", "Unknown")
-
-                # Convert target_col to string (scANVI requires string labels)
-                adata_to_train.obs[target_col] = adata_to_train.obs[target_col].astype(str)
-
-                # Initialize scANVI from the trained scVI model
-                scanvi_model = scvi.model.SCANVI.from_scvi_model(
-                    scvi_model=model,
-                    labels_key=target_col,
-                    unlabeled_category=unlabeled_cat,
-                )
-                
-                # If scanvi_epochs is not provided, we use a more generous default or respect epochs if low
-                if "scanvi_epochs" not in kwargs:
-                    if epochs > 50:
-                        scanvi_epochs = max(20, epochs // 5)
-                    else:
-                        scanvi_epochs = epochs # If base epochs are low, use same for scanvi
-                
-                self.logger.info(f"Training scANVI model with {scanvi_epochs} epochs...")
-                scanvi_model.train(max_epochs=scanvi_epochs, train_size=0.9)
-                self._report_scvi_history(scanvi_model)
-                scanvi_model.module.eval()
-
-                # Use scANVI for generation
-                latent_samples_scanvi = scanvi_model.get_latent_representation()
-                unique_classes = adata_to_train.obs[target_col].unique()
-                orig_metadata = adata_to_train.obs[target_col].values
-
-                # Sample indices proportionally by class
-                indices = []
-                for cls in unique_classes:
-                    cls_indices = np.where(orig_metadata == cls)[0]
-                    n_cls = max(1, int(round(n_samples * len(cls_indices) / len(orig_metadata))))
-                    indices.extend(np.random.choice(cls_indices, size=n_cls, replace=True).tolist())
-                indices = np.array(indices[:n_samples])
-                np.random.shuffle(indices)
-
-                latent_samples = latent_samples_scanvi[indices].astype(np.float32)
-                synthetic_metadata = orig_metadata[indices]
-
-                # Apply unified latent shift in scANVI space
-                differentiation_factor = kwargs.get("differentiation_factor", 0.0)
-                if differentiation_factor > 0.0:
-                    latent_samples = self._perform_latent_shift(
-                        embeddings=latent_samples,
-                        labels=synthetic_metadata,
-                        differentiation_factor=differentiation_factor
-                    )
-                    self.latest_embeddings = latent_samples.copy()
-
-                latent_noise_std = kwargs.get("latent_noise_std", 0.05)
-                latent_samples += np.random.randn(*latent_samples.shape).astype(np.float32) * latent_noise_std
-
-                import torch
-                with torch.no_grad():
-                    latent_tensor = torch.tensor(latent_samples).to(scanvi_model.device)
-
-                    # Library size from original
-                    if hasattr(adata_to_train.X, "toarray"):
-                        orig_lib_size = np.sum(adata_to_train.X.toarray(), axis=1)
-                    else:
-                        orig_lib_size = np.sum(adata_to_train.X, axis=1)
-                    if hasattr(orig_lib_size, "A1"):
-                        orig_lib_size = orig_lib_size.A1
-                    orig_log_lib = np.log(orig_lib_size + 1e-8)
-                    sampled_log_lib = orig_log_lib[indices]
-                    library_tensor = torch.tensor(
-                        sampled_log_lib, dtype=torch.float32
-                    ).unsqueeze(1).to(scanvi_model.device)
-
-                    batch_index = torch.zeros(len(indices), 1, dtype=torch.long).to(scanvi_model.device)
-                    
-                    # Handle labels for gene-label dispersion
-                    y_tensor = None
-                    if getattr(scanvi_model.module, "dispersion", "gene") == "gene-label":
-                        try:
-                            label_registry = scanvi_model.adata_manager.get_state_registry("labels")
-                            cat_mapping = label_registry.categorical_mapping
-                            label_map = {str(cat): i for i, cat in enumerate(cat_mapping)}
-                            y_tensor = torch.tensor(
-                                [label_map[str(m)] for m in synthetic_metadata], 
-                                dtype=torch.long
-                            ).unsqueeze(1).to(scanvi_model.device)
-                        except Exception as e:
-                            self.logger.warning(f"Could not map labels for gene-label dispersion (scANVI): {e}")
-
-                    gen_outputs = scanvi_model.module.generative(
-                        z=latent_tensor,
-                        library=library_tensor,
-                        batch_index=batch_index,
-                        y=y_tensor,
-                    )
-                    px_dist = gen_outputs["px"]
-                    try:
-                        if hasattr(px_dist, "sample"):
-                            synthetic_expression = px_dist.sample()
-                        else:
-                            synthetic_expression = px_dist.mean
-                    except Exception:
-                        synthetic_expression = torch.zeros((len(indices), adata.n_vars))
-
-                    if hasattr(synthetic_expression, "cpu"):
-                        synthetic_expression = synthetic_expression.cpu()
-                    synth_values = synthetic_expression.numpy()
-
-                synth_df = pd.DataFrame(synth_values, columns=adata.var_names)
-                synth_df[target_col] = synthetic_metadata
-                self.logger.info(f"scANVI synthesis complete. Generated {len(synth_df)} samples.")
-                return synth_df
-
-            except Exception as e:
-                self.logger.error(f"scANVI synthesis failed: {e}. Falling back to standard scVI.")
-
-        # --- ContrastiveVI Branch ---
-        # ContrastiveVI separates the latent space into "salient" (condition-specific) 
-        # and "background" (shared) components. Requires the contrastive_vi package.
-        if use_contrastivevi and target_col:
-            try:
-                from contrastive_vi.model import ContrastiveVI
-                self.logger.info("Using ContrastiveVI for salient latent differentiation...")
-
-                unique_classes = adata_to_train.obs[target_col].unique()
-                if len(unique_classes) >= 2:
-                    cls_list = list(unique_classes)
-                    bg_mask = adata_to_train.obs[target_col] == cls_list[0]
-                    fg_mask = adata_to_train.obs[target_col] == cls_list[1]
-                    background_indices = np.where(bg_mask)[0].tolist()
-                    target_indices = np.where(fg_mask)[0].tolist()
-
-                    ContrastiveVI.setup_anndata(adata_to_train)
-                    contrastive_model = ContrastiveVI(
-                        adata_to_train,
-                        background_indices=background_indices,
-                        target_indices=target_indices,
-                        n_latent=kwargs.get("n_latent", 10),
-                    )
-                    cvi_epochs = kwargs.get("epochs", 50)
-                    self.logger.info(f"Training ContrastiveVI with {cvi_epochs} epochs...")
-                    contrastive_model.train(max_epochs=cvi_epochs)
-
-                    salient_latent = contrastive_model.get_latent_representation(latent_key="salient")
-                    orig_metadata = adata_to_train.obs[target_col].values
-                    indices = np.random.choice(len(salient_latent), size=n_samples, replace=True)
-                    latent_samples = salient_latent[indices].astype(np.float32)
-                    synthetic_metadata = orig_metadata[indices]
-
-                    differentiation_factor = kwargs.get("differentiation_factor", 0.0)
-                    if differentiation_factor > 0.0:
-                        latent_samples = self._perform_latent_shift(
-                            embeddings=latent_samples,
-                            labels=synthetic_metadata,
-                            differentiation_factor=differentiation_factor
-                        )
-                        self.latest_embeddings = latent_samples.copy()
-
-                    # Decode using the base SCVI model's decoder (ContrastiveVI shares it)
-                    import torch
-                    with torch.no_grad():
-                        latent_tensor = torch.tensor(latent_samples).to(contrastive_model.device)
-                        # Use sampled library size if possible, else use mean
-                        if hasattr(adata_to_train.X, "toarray"):
-                            orig_lib_size = np.sum(adata_to_train.X.toarray(), axis=1)
-                        else:
-                            orig_lib_size = np.sum(adata_to_train.X, axis=1)
-                        if hasattr(orig_lib_size, "A1"):
-                            orig_lib_size = orig_lib_size.A1
-                        
-                        log_library_size = np.log(orig_lib_size + 1e-8)
-                        sampled_log_lib = np.random.choice(log_library_size, size=n_samples, replace=True)
-                        
-                        library_tensor = torch.tensor(
-                            sampled_log_lib, dtype=torch.float32
-                        ).unsqueeze(1).to(contrastive_model.device)
-                        
-                        background_tensor = torch.zeros_like(latent_tensor).to(contrastive_model.device)
-                        batch_index = torch.zeros(n_samples, 1, dtype=torch.long).to(contrastive_model.device)
-                        
-                        # Handle labels for gene-label dispersion
-                        y_tensor = None
-                        if getattr(contrastive_model.module, "dispersion", "gene") == "gene-label":
-                            try:
-                                label_registry = contrastive_model.adata_manager.get_state_registry("labels")
-                                cat_mapping = label_registry.categorical_mapping
-                                label_map = {str(cat): i for i, cat in enumerate(cat_mapping)}
-                                y_tensor = torch.tensor(
-                                    [label_map[str(m)] for m in synthetic_metadata], 
-                                    dtype=torch.long
-                                ).unsqueeze(1).to(contrastive_model.device)
-                            except Exception as e:
-                                self.logger.warning(f"Could not map labels for gene-label dispersion (ContrastiveVI): {e}")
-
-                        gen_outputs = contrastive_model.module.generative(
-                            z=latent_tensor,
-                            z_bg=background_tensor,
-                            library=library_tensor,
-                            batch_index=batch_index,
-                            y=y_tensor,
-                        )
-                        px_dist = gen_outputs["px"]
-                        try:
-                            if hasattr(px_dist, "sample"):
-                                synthetic_expression = px_dist.sample()
-                            else:
-                                synthetic_expression = px_dist.mean
-                        except Exception:
-                            synthetic_expression = torch.zeros((n_samples, adata.n_vars))
-                        if hasattr(synthetic_expression, "cpu"):
-                            synthetic_expression = synthetic_expression.cpu()
-                        synth_values = synthetic_expression.numpy()
-
-                    synth_df = pd.DataFrame(synth_values, columns=adata.var_names)
-                    synth_df[target_col] = synthetic_metadata
-                    self.logger.info(f"ContrastiveVI synthesis complete. Generated {len(synth_df)} samples.")
-                    return synth_df
-
-            except ImportError:
-                self.logger.warning(
-                    "ContrastiveVI not available (pip install contrastive-vi). "
-                    "Falling back to standard scVI."
-                )
-            except Exception as e:
-                self.logger.error(f"ContrastiveVI synthesis failed: {e}. Falling back to standard scVI.")
-
-        # Decide generation strategy based on new parameters
+        # Decide generation strategy based on parameters
         use_latent_sampling = kwargs.get("use_latent_sampling", True)
-        differentiation_factor = kwargs.get("differentiation_factor", 0.0)
-        latent_noise_std = kwargs.get("latent_noise_std", 0.05)
 
-        import torch
-
-        self.logger.info(f"Generating {n_samples} synthetic samples...")
+        if differentiation_factor > 0.0 and target_col:
+            return self._apply_unified_latent_differentiation(
+                syn=model,
+                data=data,
+                n_samples=n_samples,
+                target_col=target_col,
+                differentiation_factor=differentiation_factor,
+                method="scvi",
+                clipping_mode=clipping_mode,
+                clipping_factor=clipping_factor,
+                **kwargs
+            )
 
         if use_latent_sampling:
             self.logger.info("Using latent sampling for more realistic generation...")
+            # Use get_latent_representation to get the full latent space
             orig_latent = model.get_latent_representation()
             
+            # Sample indices to use for generation
             indices = np.random.choice(len(orig_latent), size=n_samples, replace=True)
             latent_samples = orig_latent[indices].astype(np.float32)
             
             synthetic_metadata = None
             if target_col and target_col in (
-                data.obs.columns if hasattr(data, "obs") else data.columns
+                adata_to_train.obs.columns
             ):
-                source_metadata = (
-                    data.obs[target_col].values
-                    if hasattr(data, "obs")
-                    else data[target_col].values
-                )
+                source_metadata = adata_to_train.obs[target_col].values
                 synthetic_metadata = source_metadata[indices]
-
-                # --- Differentiation logic ---
-                # --- Unified Differentiation logic ---
-                if differentiation_factor > 0.0:
-                    latent_samples = self._perform_latent_shift(
-                        embeddings=latent_samples,
-                        labels=synthetic_metadata,
-                        differentiation_factor=differentiation_factor
-                    )
-                    self.latest_embeddings = latent_samples.copy()
-            
-            latent_samples += np.random.randn(*latent_samples.shape).astype(np.float32) * latent_noise_std
         else:
             self.logger.info("Using standard prior sampling (random normal).")
+            # latent_samples = np.random.randn(n_samples, n_latent).astype(np.float32)
+            # Fetch n_latent from model
+            n_latent = model.module.n_latent
             latent_samples = np.random.randn(n_samples, n_latent).astype(np.float32)
             synthetic_metadata = None
+            indices = np.arange(n_samples) # Dummy indices if not latent sampling
 
         with torch.no_grad():
             latent_tensor = torch.tensor(latent_samples).to(model.device)
@@ -3235,6 +2972,18 @@ class RealGenerator(BaseGenerator):
             data = df
 
         self._validate_method(method)
+        
+        # Validate differentiation and clipping parameters for unsupported methods
+        if kwargs.get("differentiation_factor", 0.0) > 0 and method not in ["tvae", "scvi"]:
+            self.logger.warning(
+                f"differentiation_factor is only supported for 'tvae' and 'scvi'. "
+                f"It will be ignored for method '{method}'."
+            )
+        if kwargs.get("clipping_mode", "strict") != "none" and method not in ["tvae", "scvi", "ctgan"]:
+            # Note: ctgan handles its own clipping or ignores it gracefully, but we primarily 
+            # target the new logic for tvae/scvi.
+            pass
+
         # Note: params was used for default values, now all methods use **kwargs from model_params
         self.logger.info(
             f"Starting generation of {n_samples} samples using method '{method}'..."

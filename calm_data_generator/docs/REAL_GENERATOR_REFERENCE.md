@@ -108,10 +108,10 @@ The `model_params` dictionary allows fine-tuning internal parameters for each sy
 |-----------|---------|-------------|
 | `epochs` | `ctgan`, `tvae` | Number of training epochs (default: 300) |
 | `batch_size` | `ctgan`, `tvae` | Training batch size (default: 500) |
-| `n_units_conditional` | `ctgan`, `tvae` | Number of units in conditional layers |
-| `n_units_in` | `ctgan`, `tvae` | Number of units in input layers |
 | `lr` | `ctgan`, `tvae` | Learning rate |
-| `differentiation_factor` | `ctgan`, `tvae`, `scvi` | *(v1.2.0)* Shift class centroids apart in latent space. Uses **intelligent adaptive clamping** and **radial expansion** to ensure stable separation even at high factors (e.g. 10.0) without breaking decoding quality. |
+| `differentiation_factor` | `tvae`, `scvi` | *(v1.2.0)* Shift class centroids apart in latent space to force separability. Uses the unified 5-step process. |
+| `clipping_mode` | `tvae`, `scvi` | *(v1.2.0)* Clipping strategy: `'strict'`, `'permissive'`, or `'none'`. (Default: `'strict'`) |
+| `clipping_factor` | `tvae`, `scvi` | *(v1.2.0)* Percentage of range margin for `'permissive'` mode (Default: `0.1`). |
 
 **Example:**
 ```python
@@ -370,12 +370,11 @@ synthetic = gen.generate(
 | `epochs` | 100 | Training epochs |
 | `n_latent` | 10 | Latent space dimensionality |
 | `n_layers` | 1 | Number of hidden layers |
-| `differentiation_factor` | 0.0 | Latent separation factor. Higher values (1.0-10.0) push classes apart in the latent space to create more separable synthetic data. |
-| `use_scanvi` | False | If True, uses the semi-supervised scANVI model. Recommended when you have labels (`target_col`) as it provides much better class separation than standard scVI. |
-| `use_latent_sampling` | True | Controls generation fidelity. If True, it samples from real data "anchors" to preserve patient-specific textures. If False, it samples from a random normal distribution (pure synthesis). |
-| `preserve_library_size` | True | If True, the generated cells will have total count (library size) distributions similar to the original data. Crucial for RNA-seq realism. |
-| `latent_noise_std` | 0.05 | Noise magnitude for latent space sampling (higher = more diversity, lower = more fidelity). |
-| `use_contrastivevi` | False | *(Advanced)* Uses ContrastiveVI to separate "salient" (disease-specific) variation from background noise. Requires `contrastive_vi` package. |
+| `differentiation_factor` | 0.0 | Latent separation factor. Uses unified 5-step process to push classes apart. |
+| `clipping_mode` | `'strict'` | Clipping strategy: `'strict'`, `'permissive'`, or `'none'`. |
+| `use_latent_sampling` | True | Controls generation fidelity. If True, it samples from real data "anchors" to preserve patient-specific textures. |
+| `preserve_library_size` | True | If True, the generated cells will have total count (library size) distributions similar to the original data. |
+| `latent_noise_std` | 0.05 | Noise magnitude for latent space sampling (higher = more diversity). |
 
 > [!TIP]
 > **AnnData Support:** When passing `AnnData`, the object is used directly without conversion, preserving the original structure. The output is always a `pd.DataFrame` containing both the gene expression and the observations metadata.

@@ -83,6 +83,7 @@ Genera un informe estático incluyendo:
 - **Puntuaciones de Calidad Global**: Métricas de similitud generales y por columna.
 - **Evaluación de Privacidad**: Métricas de Distancia al Registro Más Cercano (DCR).
 - **Visualizaciones**: Histogramas, gráficos de densidad, proyecciones PCA/UMAP.
+- **Métricas ARI (Separabilidad de Clases)**: Índice de Rand Ajustado (ARI) mediante K-Means (k=2) para cuantificar qué tan bien se separan las clases (Casos vs Controles) tanto en datos reales como sintéticos.
 - **Análisis de Drift**: Comparación visual de distribuciones de features.
 
 ```python
@@ -110,6 +111,18 @@ metrics = reporter.calculate_quality_metrics(
     synthetic_df=df2
 )
 # Devuelve: {'overall_quality_score': 0.85, 'weighted_quality_score': 0.82}
+```
+
+### `calculate_ari`
+Cálculo independiente del Índice de Rand Ajustado (ARI) para cuantificar la separabilidad de clases.
+
+```python
+ari_metrics = reporter.calculate_ari(
+    real_df=df1, 
+    synthetic_df=df2,
+    target_col="label"
+)
+# Devuelve: {'ari_original': 0.95, 'ari_synthetic': 0.98, 'ari_improvement': 0.03}
 ```
 
 ## Reporter Discriminador (Adversarial Validation)

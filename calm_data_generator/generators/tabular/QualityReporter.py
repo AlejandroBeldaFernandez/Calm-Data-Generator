@@ -14,6 +14,12 @@ import logging
 from datetime import datetime
 import os
 import json
+try:
+    from sklearn.cluster import KMeans
+    from sklearn.metrics import adjusted_rand_score
+    SKLEARN_AVAILABLE = True
+except ImportError:
+    SKLEARN_AVAILABLE = False
 
 from calm_data_generator.reports.ExternalReporter import ExternalReporter
 from calm_data_generator.reports.Visualizer import Visualizer
@@ -93,6 +99,17 @@ class QualityReporter(BaseReporter):
                              Returns {'error': ...} if SDMetrics is not available or fails.
         """
         return self._assess_quality_scores(real_df, synthetic_df)
+
+    def calculate_ari(
+        self, 
+        real_df: pd.DataFrame, 
+        synthetic_df: pd.DataFrame, 
+        target_col: str
+    ) -> Dict[str, float]:
+        """
+        Public method to calculate ARI metrics without generating a full report.
+        """
+        return self._calculate_ari_metrics(real_df, synthetic_df, target_col) or {}
 
     def generate_report(self, *args, **kwargs):
         """Wrapper for generate_comprehensive_report to satisfy BaseReporter contract."""
@@ -257,6 +274,7 @@ class QualityReporter(BaseReporter):
             "sequential_quality": sequential_quality,
             "privacy_metrics": privacy_metrics,
             "constraints_stats": constraints_stats,
+            "ari_metrics": self._calculate_ari_metrics(real_df_for_report, synthetic_df_for_report, target_column),
         }
 
         results_path = os.path.join(output_dir, "report_results.json")
@@ -716,4 +734,54 @@ class QualityReporter(BaseReporter):
             }
         except Exception as e:
             self.logger.error(f"Privacy check failed: {e}")
+            return None
+
+    def _calculate_ari_metrics(
+        self, 
+        real_df: pd.DataFrame, 
+        synthetic_df: pd.DataFrame, 
+        target_col: Optional[str]
+    ) -> Optional[Dict[str, float]]:
+        """
+        Calculates Adjusted Rand Index (ARI) using KMeans (k=2) to assess class separability.
+        """
+        if not SKLEARN_AVAILABLE or not target_col or target_col not in real_df.columns:
+            return None
+
+        try:
+            if self.verbose:
+                print("Calculating ARI metrics (class separability)...")
+
+            def get_ari(df, t_col):
+                # Use only numeric features for clustering
+                features = df.select_dtypes(include=[np.number]).drop(columns=[t_col], errors='ignore')
+                if features.empty:
+                    return None
+                
+                # Fill NaNs for KMeans
+                X = features.fillna(0).values
+                
+                # Handle cases where we have fewer samples than clusters
+                k = min(2, len(X))
+                if k < 2:
+                    return 0.0
+                
+                kmeans = KMeans(n_clusters=k, n_init=10, random_state=42)
+                cluster_labels = kmeans.fit_predict(X)
+                
+                # Get true labels (convert to categorical codes if necessary)
+                true_labels = pd.Categorical(df[t_col]).codes
+                
+                return float(adjusted_rand_score(true_labels, cluster_labels))
+
+            ari_real = get_ari(real_df, target_col)
+            ari_synth = get_ari(synthetic_df, target_col)
+
+            return {
+                "ari_original": ari_real,
+                "ari_synthetic": ari_synth,
+                "ari_improvement": (ari_synth - ari_real) if (ari_real is not None and ari_synth is not None) else 0.0
+            }
+        except Exception as e:
+            logger.error(f"ARI calculation failed: {e}")
             return None

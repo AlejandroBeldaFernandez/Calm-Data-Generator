@@ -111,7 +111,8 @@ Puedes pasar parámetros específicos al modelo subyacente a través de `**kwarg
 - `n_estimators`: Número de árboles.
 - `max_depth`: Profundidad máxima.
 - `balance_target`: `True` para reequilibrar clases antes de entrenar.
-- `use_scanvi`: `True` para usar scANVI y mejorar la separación de clases.
+- `differentiation_factor`: Factor de separación latente (v1.2.0).
+- `clipping_mode`: Estrategia de recorte (`'strict'`, `'permissive'`, `'none'`).
 - `use_latent_sampling`: `True` para mayor fidelidad biológica.
 
 ---

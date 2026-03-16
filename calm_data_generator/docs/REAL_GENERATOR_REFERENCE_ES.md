@@ -109,9 +109,10 @@ El diccionario `**kwargs` permite el ajuste fino de parámetros internos para ca
 |-----------|---------|-------------|
 | `epochs` | `ctgan`, `tvae` | Número de épocas de entrenamiento (defecto: 300) |
 | `batch_size` | `ctgan`, `tvae` | Tamaño del batch de entrenamiento (defecto: 500) |
-| `n_units_conditional` | `ctgan`, `tvae` | Unidades en capas condicionales |
 | `lr` | `ctgan`, `tvae` | Tasa de aprendizaje (Learning rate) |
-| `differentiation_factor` | `ctgan`, `tvae`, `scvi` | *(v1.2.0)* Desplaza los centroides de clase en el espacio latente. Utiliza **clamping adaptativo inteligente** y **expansión radial** para asegurar una separación estable incluso con factores altos (ej. 10.0) sin romper la calidad de la decodificación. |
+| `differentiation_factor` | `tvae`, `scvi` | *(v1.2.0)* Desplaza los centroides de clase en el espacio latente para forzar la separabilidad. Utiliza el proceso unificado de 5 pasos. |
+| `clipping_mode` | `tvae`, `scvi` | *(v1.2.0)* Estrategia de recorte: `'strict'`, `'permissive'`, o `'none'`. (Por defecto: `'strict'`) |
+| `clipping_factor` | `tvae`, `scvi` | *(v1.2.0)* Porcentaje de margen para el modo `'permissive'` (Por defecto: `0.1`). |
 
 
 **Ejemplo:**
@@ -184,12 +185,11 @@ synthetic = gen.generate(
 | `epochs` | Épocas de entrenamiento (default: 100) |
 | `n_latent` | Dimensionalidad del espacio latente (default: 10) |
 | `n_layers` | Número de capas ocultas (default: 1) |
-| `differentiation_factor` | Factor de separación latente. Valores altos (1.0-10.0) empujan las clases en el espacio latente para crear datos sintéticos más separables. |
-| `use_scanvi` | Si es True, utiliza el modelo semi-supervisado scANVI. Recomendado cuando se tienen etiquetas (`target_col`) ya que proporciona una separación de clases mucho mejor que scVI estándar. |
-| `use_latent_sampling` | Controla la fidelidad de generación. Si es True, muestrea desde "anclas" de datos reales para preservar la textura específica del paciente. Si es False, genera desde ruido (síntesis pura). |
-| `preserve_library_size` | Si es True, las células generadas mantendrán una distribución de conteos totales (library size) similar a los originales. Crucial para el realismo en RNA-seq. |
-| `latent_noise_std` | Magnitud del ruido para el muestreo del espacio latente (mayor = más diversidad, menor = más fidelidad). |
-| `use_contrastivevi` | *(Avanzado)* Usa ContrastiveVI para separar la variación "saliente" (específica de la enfermedad) del ruido de fondo. Requiere el paquete `contrastive_vi`. |
+| `differentiation_factor` | 0.0 | Factor de separación latente. Utiliza el proceso unificado de 5 pasos para empujar las clases. |
+| `clipping_mode` | `'strict'` | Estrategia de recorte: `'strict'`, `'permissive'`, o `'none'`. |
+| `use_latent_sampling` | True | Controla la fidelidad de generación. Si es True, muestrea desde "anclas" de datos reales. |
+| `preserve_library_size` | True | Si es True, mantiene la distribución de conteos totales (library size) original. |
+| `latent_noise_std` | 0.05 | Magnitud del ruido para el muestreo del espacio latente (mayor = más diversidad). |
 
 
 

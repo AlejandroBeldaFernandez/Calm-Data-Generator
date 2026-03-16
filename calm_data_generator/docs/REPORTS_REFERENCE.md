@@ -83,6 +83,7 @@ Generates a static report including:
 - **Overall Quality Scores**: Overall and column-wise similarity metrics.
 - **Privacy Assessment**: Distance to Closest Record (DCR) metrics.
 - **Visualizations**: Histograms, density plots, PCA/UMAP projections.
+- **ARI Metrics (Class Separability)**: Adjusted Rand Index (ARI) using K-Means (k=2) to quantify how well classes (Cases vs Controles) are separated in both real and synthetic data.
 - **Drift Analysis**: Visual comparison of feature distributions.
 
 ```python
@@ -110,6 +111,18 @@ metrics = reporter.calculate_quality_metrics(
     synthetic_df=df2
 )
 # Returns: {'overall_quality_score': 0.85, 'weighted_quality_score': 0.82}
+```
+
+### `calculate_ari`
+Standalone calculation of Adjusted Rand Index (ARI) to quantify class separability.
+
+```python
+ari_metrics = reporter.calculate_ari(
+    real_df=df1, 
+    synthetic_df=df2,
+    target_col="label"
+)
+# Returns: {'ari_original': 0.95, 'ari_synthetic': 0.98, 'ari_improvement': 0.03}
 ```
 
 ## Discriminator Reporter (Adversarial Validation)

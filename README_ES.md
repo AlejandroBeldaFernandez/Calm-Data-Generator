@@ -14,6 +14,8 @@
 - **Síntesis Tabular** - CTGAN, TVAE, CART y más.
 - **Series Temporales** - TimeGAN, DGAN
 - **Single-Cell** - scVI, GEARS (Predicción de Perturbaciones)
+- **Diferenciación Latente** - Fuerza la separabilidad de clases en TVAE y scVI
+- **Clipping Flexible** - Control estricto o permisivo de los rangos de datos
 - **Inyección de Drift (Desviación)** - Prueba la robustez de modelos ML con drift controlado.
 - **Preservación de Privacidad** - Privacidad diferencial, pseudonimización, generalización.
 - **Evolución de Escenarios** - Evolución de features y construcción de targets.
@@ -237,6 +239,8 @@ synthetic = gen.generate(
     n_samples=1000,
     method='ctgan',
     target_col='label',
+    differentiation_factor=2.0, # NUEVO: Mejora la separabilidad de clases
+    clipping_mode='permissive', # NUEVO: Gestión de rangos de datos
     epochs=300, 
     batch_size=500,
     discriminator_steps=1

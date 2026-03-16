@@ -168,8 +168,9 @@ synthetic = gen.generate(
     expression_df, 1000,
     method='scvi',
     target_col='cell_type',  
-    use_scanvi=True,         # Better class separation
-    use_latent_sampling=True # Higher biological fidelity
+    differentiation_factor=2.0, # NEW: Enhance class separability
+    clipping_mode='strict',     # NEW: Choose clipping strategy
+    use_latent_sampling=True    # Higher biological fidelity
 )
 
 
