@@ -21,11 +21,12 @@ Key Features:
 """
 
 import logging
+import math
+import warnings
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
 
-import warnings
 from typing import Optional, Dict, Any, List, Union
 import logging
 import os
@@ -795,6 +796,89 @@ class RealGenerator(BaseGenerator):
 
         return synth_df  
 
+    def _perform_latent_shift(
+        self,
+        embeddings: Any,
+        labels: np.ndarray,
+        differentiation_factor: float,
+    ) -> Any:
+        """
+        Calculates and applies a radial shift to latent embeddings to increase separability.
+        Internal method that handles both PyTorch Tensors (TVAE) and NumPy Arrays (scVI).
+        """
+        import torch
+        
+        is_numpy = isinstance(embeddings, np.ndarray)
+        if is_numpy:
+            device = "cpu"
+            # Ensure float32 for torch
+            emb_tensor = torch.from_numpy(embeddings.astype(np.float32))
+        else:
+            device = embeddings.device
+            emb_tensor = embeddings
+
+        if len(embeddings) != len(labels):
+            self.logger.warning(f"Shape mismatch: embeddings({len(embeddings)}) vs labels({len(labels)}). Skipping shift.")
+            return embeddings
+
+        unique_classes = np.unique(labels)
+        if len(unique_classes) < 2:
+            return embeddings
+
+        # 1. Global centroid and Manifold Scale
+        global_centroid = emb_tensor.mean(dim=0)
+        
+        # Calculate spread/radius of the manifold relative to its center
+        # This is more robust than distance to the absolute origin [0,0]
+        centered_emb = emb_tensor - global_centroid
+        avg_radius = torch.norm(centered_emb, dim=1).mean().item()
+        avg_radius = max(avg_radius, 0.5) # Avoid division by zero
+        
+        # 2. Intelligent Adaptive Clamping
+        # Scale max_shift by dimension sqrt(D) and manifold scale
+        n_latent = emb_tensor.shape[1]
+        base_limit = math.sqrt(n_latent) * 2.0 
+        max_allowed_shift = min(base_limit * 2.0, avg_radius * 4.0) 
+        
+        self.logger.info(
+            f"Latent Shift: Factor={differentiation_factor}, "
+            f"Limit={max_allowed_shift:.2f}, LatentDim={n_latent}"
+        )
+
+        new_embeddings = emb_tensor.clone().to(device)
+        labels_tensor = torch.from_numpy(labels).to(device) if not is_numpy else labels
+
+        # 3. Apply radial shifts per class
+        for cls in unique_classes:
+            mask = (labels == cls) # Boolean mask
+            if not np.any(mask):
+                continue
+                
+            class_centroid = emb_tensor[mask].mean(dim=0).to(device)
+            direction = class_centroid - global_centroid.to(device)
+            
+            dist_norm = torch.norm(direction)
+            if dist_norm < 1e-6:
+                continue # Classes are already perfectly overlapped at the center
+            
+            # Initial raw shift
+            raw_shift_vector = differentiation_factor * direction
+            raw_shift_norm = torch.norm(raw_shift_vector)
+            
+            # 4. Soft-clamping (Tanh)
+            # This ensures that higher differentiation_factor still produces 
+            # more separation than lower ones, but at a decreasing rate.
+            dampening = torch.tanh(raw_shift_norm / max_allowed_shift)
+            intelligent_shift = (raw_shift_vector / raw_shift_norm) * (max_allowed_shift * dampening)
+            
+            # Apply to all samples of this class
+            # mask can be used directly on torch tensors
+            new_embeddings[mask] += intelligent_shift
+                
+        if is_numpy:
+            return new_embeddings.detach().cpu().numpy()
+        return new_embeddings
+
     def _apply_latent_differentiation(
         self,
         syn: Any,
@@ -854,23 +938,14 @@ class RealGenerator(BaseGenerator):
                 return syn.generate(count=n_samples).dataframe()
 
            
-            if len(unique_classes) == 2:
-                mask_0 = (data[target_col] == unique_classes[0]).values
-                mask_1 = (data[target_col] == unique_classes[1]).values
-                
-                centroid_0 = embeddings[mask_0].mean(dim=0)
-                centroid_1 = embeddings[mask_1].mean(dim=0)
-                
-                distance_vector = centroid_1 - centroid_0
-                
-                embeddings[mask_0] -= (differentiation_factor / 2) * distance_vector
-                embeddings[mask_1] += (differentiation_factor / 2) * distance_vector
-                
-                self.logger.info("Latent embeddings shifted successfully.")
-                self.latest_embeddings = embeddings.cpu().numpy() # Save for user access
-            else:
-                self.logger.warning("Latent differentiation currently supports exactly 2 classes. Skipping shift.")
-                self.latest_embeddings = embeddings.cpu().numpy()
+            # Apply unified latent shift
+            labels = data[target_col].values
+            embeddings = self._perform_latent_shift(
+                embeddings=embeddings,
+                labels=labels,
+                differentiation_factor=differentiation_factor
+            )
+            self.latest_embeddings = embeddings.cpu().numpy() if hasattr(embeddings, "cpu") else embeddings
                 
             # Decode back
             
@@ -1947,23 +2022,15 @@ class RealGenerator(BaseGenerator):
 
                 # Apply differentiation factor in scANVI latent space
                 differentiation_factor = kwargs.get("differentiation_factor", 0.0)
+                # Apply unified latent shift in scANVI space
+                differentiation_factor = kwargs.get("differentiation_factor", 0.0)
                 if differentiation_factor > 0.0:
-                    self.logger.info(
-                        f"Applying differentiation factor {differentiation_factor} in scANVI latent space..."
+                    latent_samples = self._perform_latent_shift(
+                        embeddings=latent_samples,
+                        labels=synthetic_metadata,
+                        differentiation_factor=differentiation_factor
                     )
-                    global_centroid = np.mean(latent_samples, axis=0)
-                    for c in unique_classes:
-                        mask = synthetic_metadata == c
-                        if np.sum(mask) > 0:
-                            class_centroid = np.mean(latent_samples[mask], axis=0)
-                            direction = class_centroid - global_centroid
-                            shift = differentiation_factor * direction
-                            # Clamp to prevent wild decodings
-                            max_shift = 5.0
-                            shift_norm = np.linalg.norm(shift)
-                            if shift_norm > max_shift:
-                                shift = shift * (max_shift / shift_norm)
-                            latent_samples[mask] += shift
+                    self.latest_embeddings = latent_samples.copy()
 
                 latent_noise_std = kwargs.get("latent_noise_std", 0.05)
                 latent_samples += np.random.randn(*latent_samples.shape).astype(np.float32) * latent_noise_std
@@ -2047,17 +2114,11 @@ class RealGenerator(BaseGenerator):
 
                     differentiation_factor = kwargs.get("differentiation_factor", 0.0)
                     if differentiation_factor > 0.0:
-                        global_centroid = np.mean(latent_samples, axis=0)
-                        for c in unique_classes:
-                            mask = synthetic_metadata == c
-                            if np.sum(mask) > 0:
-                                cc = np.mean(latent_samples[mask], axis=0)
-                                direction = cc - global_centroid
-                                shift = differentiation_factor * direction
-                                shift_norm = np.linalg.norm(shift)
-                                if shift_norm > 5.0:
-                                    shift = shift * (5.0 / shift_norm)
-                                latent_samples[mask] += shift
+                        latent_samples = self._perform_latent_shift(
+                            embeddings=latent_samples,
+                            labels=synthetic_metadata,
+                            differentiation_factor=differentiation_factor
+                        )
                         self.latest_embeddings = latent_samples.copy()
 
                     # Decode using the base SCVI model's decoder (ContrastiveVI shares it)
@@ -2129,36 +2190,14 @@ class RealGenerator(BaseGenerator):
                 synthetic_metadata = source_metadata[indices]
 
                 # --- Differentiation logic ---
+                # --- Unified Differentiation logic ---
                 if differentiation_factor > 0.0:
-                    self.logger.info(f"Applying differentiation factor {differentiation_factor} in latent space...")
-                    unique_classes = np.unique(synthetic_metadata)
-                    
-                    if len(unique_classes) > 1:
-                        global_centroid = np.mean(latent_samples, axis=0)
-                        
-                        for c in unique_classes:
-                            mask = (synthetic_metadata == c)
-                            if np.sum(mask) > 0:
-                                class_centroid = np.mean(latent_samples[mask], axis=0)
-                                direction = class_centroid - global_centroid
-                                
-                                # Apply differentiation
-                                shift = differentiation_factor * direction
-                                
-                                # Clamp shift to prevent wild decodings (inf values)
-                                max_shift = 5.0
-                                shift_norm = np.linalg.norm(shift, axis=-1, keepdims=True)
-                                # Avoid division by zero
-                                shift_norm = np.where(shift_norm == 0, 1.0, shift_norm)
-                                
-                                # Scale down shift if it exceeds max_shift length
-                                shift = np.where(shift_norm > max_shift, shift * (max_shift / shift_norm), shift)
-                                
-                                latent_samples[mask] += shift
-                    else:
-                        self.logger.warning("differentiation_factor > 0 but only 1 class found. Ignoring.")
-                
-                self.latest_embeddings = latent_samples.copy()
+                    latent_samples = self._perform_latent_shift(
+                        embeddings=latent_samples,
+                        labels=synthetic_metadata,
+                        differentiation_factor=differentiation_factor
+                    )
+                    self.latest_embeddings = latent_samples.copy()
             
             latent_samples += np.random.randn(*latent_samples.shape).astype(np.float32) * latent_noise_std
         else:
