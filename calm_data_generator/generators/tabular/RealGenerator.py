@@ -25,6 +25,7 @@ import math
 import warnings
 import pandas as pd
 import numpy as np
+import torch
 from tqdm import tqdm
 
 from typing import Optional, Dict, Any, List, Union
@@ -733,6 +734,12 @@ class RealGenerator(BaseGenerator):
         self._patch_synthcity_encoder()  # Apply patch
         if "epochs" in model_kwargs:
             model_kwargs["n_iter"] = model_kwargs.pop("epochs")
+        
+        # Filter out parameters not supported by CTGAN plugin
+        model_kwargs.pop("differentiation_factor", None)
+        model_kwargs.pop("clipping_mode", None)
+        model_kwargs.pop("clipping_factor", None)
+        
         syn = self._get_synthesizer("ctgan", **model_kwargs)
         syn.fit(data)
         self.synthesizer = syn
