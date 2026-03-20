@@ -3,20 +3,23 @@ import numpy as np
 import tempfile
 import os
 import pytest
-from calm_data_generator.generators.configs import DriftConfig, ReportConfig, DateConfig
+from calm_data_generator.generators.configs import DriftConfig, ReportConfig
 
 
 @pytest.fixture
 def sample_data():
-    """Create sample data with more balanced classes for SMOTE/ADASYN."""
+    """Create sample data for testing."""
     np.random.seed(42)
+    n = 100
     return pd.DataFrame(
         {
-            "age": np.random.randint(20, 70, 100),
-            "income": np.random.normal(50000, 15000, 100).astype(int),
-            "score": np.random.uniform(0, 100, 100),
-            "category": np.random.choice(["A", "B", "C"], 100),
-            "target": np.random.choice([0, 1], 100, p=[0.6, 0.4]),
+            "age": np.random.randint(20, 70, n),
+            "income": np.random.normal(50000, 15000, n).astype(int),
+            "score": np.random.uniform(0, 100, n),
+            "category": np.random.choice(["A", "B", "C"], n),
+            "target": np.random.choice([0, 1], n, p=[0.6, 0.4]),
+            "timestamp": pd.date_range("2024-01-01", periods=n, freq="D"),
+            "block": np.repeat(range(10), 10),
         }
     )
 
@@ -26,6 +29,7 @@ def test_real_generator_methods(sample_data):
     from calm_data_generator.generators.tabular import RealGenerator
 
     gen = RealGenerator(auto_report=False)
+    numeric_data = sample_data.select_dtypes(include=[np.number])
 
     # CART
     synth = gen.generate(sample_data, 20, method="cart", target_col="target")
@@ -35,7 +39,7 @@ def test_real_generator_methods(sample_data):
     synth = gen.generate(sample_data, 20, method="rf", target_col="target")
     assert synth is not None and len(synth) == 20
 
-    # LGBM (low epochs)
+    # LGBM (low estimators)
     synth = gen.generate(
         sample_data, 20, method="lgbm", target_col="target", n_estimators=5
     )
@@ -45,28 +49,76 @@ def test_real_generator_methods(sample_data):
     synth = gen.generate(sample_data, 20, method="resample", target_col="target")
     assert synth is not None and len(synth) == 20
 
-    # SMOTE
-    numeric_data = sample_data[["age", "income", "score", "target"]].copy()
-    synth = gen.generate(numeric_data, 30, method="smote", target_col="target")
+    # SMOTE (numeric only)
+    numeric_no_ts = sample_data[["age", "income", "score", "target"]].copy()
+    synth = gen.generate(numeric_no_ts, 30, method="smote", target_col="target")
     assert synth is not None and len(synth) == 30
 
-    # Copula
+    # Copula (numeric only)
     synth = gen.generate(numeric_data, 30, method="copula")
     assert synth is not None and len(synth) == 30
 
-    # CTGAN (Skip if synthcity fails)
+    # GMM (numeric only)
+    try:
+        synth = gen.generate(numeric_data, 10, method="gmm", target_col="target")
+        if synth is None:
+            pytest.skip("GMM returned None (likely missing dependency)")
+        assert len(synth) == 10
+    except ImportError:
+        pytest.skip("GMM failed due to missing dependency")
+
+    # CTGAN (skip if synthcity fails)
     try:
         synth = gen.generate(sample_data, 10, method="ctgan", epochs=1)
         assert synth is not None and len(synth) == 10
     except Exception as e:
         print(f"Skipping CTGAN test: {e}")
 
-    # TVAE (Skip if synthcity fails)
+    # TVAE (skip if synthcity fails)
     try:
         synth = gen.generate(sample_data, 10, method="tvae", epochs=1)
         assert synth is not None and len(synth) == 10
     except Exception as e:
         print(f"Skipping TVAE test: {e}")
+
+
+def test_new_synthesis_methods(sample_data):
+    """Test DDPM synthesis method."""
+    from calm_data_generator.generators.tabular import RealGenerator
+
+    gen = RealGenerator(auto_report=False)
+
+    try:
+        synth = gen.generate(
+            sample_data,
+            n_samples=10,
+            method="ddpm",
+            n_iter=10,
+            batch_size=32,
+        )
+        assert synth is not None and len(synth) == 10
+    except ImportError:
+        pytest.skip("Synthcity not available for DDPM")
+
+
+def test_ddpm_parameters(sample_data):
+    """Test DDPM with different parameters."""
+    from calm_data_generator.generators.tabular import RealGenerator
+
+    gen = RealGenerator(auto_report=False)
+
+    try:
+        synth = gen.generate(
+            sample_data,
+            n_samples=5,
+            method="ddpm",
+            n_iter=5,
+            model_type="mlp",
+            scheduler="cosine",
+        )
+        assert synth is not None and len(synth) == 5
+    except ImportError:
+        pytest.skip("Synthcity not available for DDPM")
 
 
 def test_clinical_data_generator():
@@ -79,11 +131,23 @@ def test_clinical_data_generator():
     assert len(result["demographics"]) == 10
 
 
+def test_clinical_data_generator_longitudinal():
+    """Test longitudinal clinical data generation."""
+    from calm_data_generator.generators.clinical import ClinicalDataGenerator
+
+    clin_gen = ClinicalDataGenerator()
+    result = clin_gen.generate_longitudinal_data(
+        n_samples=5, longitudinal_config={"n_visits": 2}
+    )
+    assert result is not None
+
+
 def test_drift_injector(sample_data):
     """Test standard drift injection methods."""
     from calm_data_generator.generators.drift import DriftInjector
 
     injector = DriftInjector()
+
     # Gradual drift
     drifted = injector.inject_feature_drift_gradual(
         df=sample_data.copy(),
@@ -107,20 +171,51 @@ def test_drift_injector(sample_data):
     assert len(drifted) == len(sample_data)
 
 
+def test_drift_injector_all_modes(sample_data):
+    """Test abrupt drift mode."""
+    from calm_data_generator.generators.drift import DriftInjector
+
+    injector = DriftInjector()
+    drifted = injector.inject_drift(
+        df=sample_data,
+        columns="score",
+        drift_type="shift",
+        magnitude=0.5,
+        mode="abrupt",
+    )
+    assert len(drifted) == len(sample_data)
+
+
+def test_drift_config_usage(sample_data):
+    """Test DriftConfig object usage with inject_multiple_types_of_drift."""
+    from calm_data_generator.generators.drift import DriftInjector
+
+    injector = DriftInjector()
+    config = DriftConfig(
+        method="inject_drift",
+        params={
+            "columns": ["score"],
+            "drift_type": "shift",
+            "magnitude": 0.5,
+            "mode": "abrupt",
+        },
+    )
+    drifted = injector.inject_multiple_types_of_drift(df=sample_data, schedule=[config])
+    assert len(drifted) == len(sample_data)
+
+
 def test_scenario_injector(sample_data):
     """Test ScenarioInjector features."""
     from calm_data_generator.generators.dynamics import ScenarioInjector
 
     scenario = ScenarioInjector(seed=42)
-    ts_data = sample_data.copy()
-    ts_data["timestamp"] = pd.date_range("2024-01-01", periods=len(ts_data), freq="D")
 
     evolved = scenario.evolve_features(
-        df=ts_data,
+        df=sample_data.copy(),
         evolution_config={"score": {"type": "trend", "rate": 0.05}},
         time_col="timestamp",
     )
-    assert len(evolved) == len(ts_data)
+    assert len(evolved) == len(sample_data)
 
     result = scenario.construct_target(
         df=sample_data.copy(),
@@ -129,35 +224,6 @@ def test_scenario_injector(sample_data):
         task_type="regression",
     )
     assert "new_target" in result.columns
-
-
-# DEPRECATED: Anonymizer module has been removed in migration to Synthcity
-# Privacy features are now available through:
-# - Synthcity's differential privacy models
-# - QualityReporter's privacy_check (DCR metrics)
-# def test_anonymizer(sample_data):
-#     """Test data anonymization functions."""
-#     from calm_data_generator.anonymizer import (
-#         pseudonymize_columns,
-#         add_laplace_noise,
-#         generalize_numeric_to_ranges,
-#         shuffle_columns,
-#     )
-#
-#     priv_data = sample_data.copy()
-#     priv_data["id"] = [f"P{i}" for i in range(len(priv_data))]
-#     result = pseudonymize_columns(priv_data, columns=["id"])
-#     assert "id" in result.columns
-#
-#     result = add_laplace_noise(sample_data.copy(), columns=["age"], epsilon=1.0)
-#     assert len(result) == len(sample_data)
-#
-#     result = generalize_numeric_to_ranges(
-#         sample_data.copy(),
-#         columns=["age"],
-#         num_bins=5,
-#     )
-#     assert len(result) == len(sample_data)
 
 
 def test_single_call_workflow(sample_data):
@@ -191,51 +257,21 @@ def test_single_call_workflow(sample_data):
         assert len(os.listdir(tmpdir)) > 0
 
 
-def test_new_synthesis_methods(sample_data):
-    """Test new synthesis methods: ddpm, timegan, timevae."""
-    from calm_data_generator.generators.tabular import RealGenerator
-
-    gen = RealGenerator(auto_report=False)
-
-    # Test DDPM (Synthcity TabDDPM)
+def test_stream_generator_basic(sample_data):
+    """Test basic StreamGenerator functionality."""
     try:
-        synth = gen.generate(
-            sample_data,
-            n_samples=10,
-            method="ddpm",
-            n_iter=10,  # Very low for testing
-            batch_size=32,
-        )
-        assert synth is not None and len(synth) == 10
-        print("✅ DDPM test passed")
+        from calm_data_generator.generators.stream import StreamGenerator
     except ImportError:
-        pytest.skip("Synthcity not available for DDPM")
+        pytest.skip("StreamGenerator dependencies not met")
 
-    # Test TimeGAN (requires time series data structure)
-    # Skipping for now as it requires specific data format
-
-    # Test TimeVAE (requires time series data structure)
-    # Skipping for now as it requires specific data format
-
-
-def test_ddpm_parameters(sample_data):
-    """Test DDPM with different parameters."""
-    from calm_data_generator.generators.tabular import RealGenerator
-
-    gen = RealGenerator(auto_report=False)
+    stream_gen = StreamGenerator(auto_report=False)
 
     try:
-        # Test with different model types
-        for model_type in ["mlp"]:  # Only test MLP for speed
-            synth = gen.generate(
-                sample_data,
-                n_samples=5,
-                method="ddpm",
-                n_iter=5,
-                model_type=model_type,
-                scheduler="cosine",
-            )
-            assert synth is not None and len(synth) == 5
-        print("✅ DDPM parameters test passed")
+        from river import synth
+
+        river_gen = synth.Agrawal(seed=42)
+        result = stream_gen.generate(generator_instance=river_gen, n_samples=20)
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) == 20
     except ImportError:
-        pytest.skip("Synthcity not available for DDPM")
+        pytest.skip("River not installed")

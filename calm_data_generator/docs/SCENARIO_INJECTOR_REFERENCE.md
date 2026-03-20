@@ -1,6 +1,6 @@
 # ScenarioInjector - Complete Reference
 
-**Location:** `calm_data_generator.injectors.ScenarioInjector`
+**Location:** `calm_data_generator.generators.dynamics.ScenarioInjector`
 
 The `ScenarioInjector` simulates **temporal dynamics** and **evolving patterns** in synthetic datasets. Unlike `DriftInjector` which modifies distributions, `ScenarioInjector` creates deterministic or stochastic patterns of evolution (how features change over time) and constructs target variables based on logic.
 
@@ -32,7 +32,7 @@ scenario_conf = ScenarioConfig(
 # gen.generate(..., dynamics_config=scenario_conf)
 
 # Via Direct Injection:
-from calm_data_generator.injectors import ScenarioInjector
+from calm_data_generator.generators.dynamics import ScenarioInjector
 injector = ScenarioInjector()
 df_evolved = injector.apply_config(df, scenario_conf)
 ```
@@ -42,7 +42,7 @@ df_evolved = injector.apply_config(df, scenario_conf)
 ## 🌲 Decision Tree: Usage Guide
 
 ```text
-What do you want to to?
+What do you want to do?
 ├─ Make values change over time (Growth, Seasonality)?
 │  └─ → inject_feature_evolution() (or ScenarioConfig.evolve_features)
 ├─ Create a Target variable from Features?
@@ -70,7 +70,7 @@ What do you want to to?
 
 ## 🛠️ ScenarioInjector Class Reference
 
-**Import:** `from calm_data_generator.injectors import ScenarioInjector`
+**Import:** `from calm_data_generator.generators.dynamics import ScenarioInjector`
 
 ### Method: `evolve_features()`
 

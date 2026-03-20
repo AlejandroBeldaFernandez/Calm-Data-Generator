@@ -20,14 +20,16 @@ from calm_data_generator.generators.tabular import RealGenerator, QualityReporte
 | `bn` | Bayesian Network (causal structure) |
 | `smote` | SMOTE oversampling |
 | `adasyn` | ADASYN adaptive sampling |
-
-| `diffusion` | Tabular Diffusion (DDPM) |
-| `ddpm` | Synthcity TabDDPM (advanced) |
 | `timegan` | TimeGAN (time series) |
 | `timevae` | TimeVAE (time series VAE) |
 | `fflows` | FourierFlows (periodic time series) |
 | `scvi` | scVI (Single-Cell VI) |
+| `ddpm` | Tabular Diffusion (DDPM) |
 
+**New Parameters (v1.2.0):**
+- `differentiation_factor` (float): Enhances class separation in latent space (TVAE/scVI only).
+- `clipping_mode` (str): `'strict'`, `'permissive'`, or `'none'` for handling output ranges.
+- `use_latent_sampling` (bool): For scVI, sample from real data latent space.
 
 
 ---
@@ -35,7 +37,7 @@ from calm_data_generator.generators.tabular import RealGenerator, QualityReporte
 ### generators.clinical - Clinical Data
 
 ```python
-from calm_data_generator.generators.clinical import ClinicalDataGenerator, DateConfig
+from calm_data_generator.generators.clinical import ClinicalDataGenerator
 ```
 
 **Methods:**
@@ -97,10 +99,14 @@ from calm_data_generator.generators.dynamics import ScenarioInjector
 
 ### privacy - Privacy Transformations (Integrated)
 
-Privacy features are integrated into the `QualityReporter`. You can assess privacy using:
+Privacy features are integrated into the `QualityReporter`. You can assess quality and privacy using:
 
 ```python
+# Comprehensive Quality Report (including ARI metrics for class separability)
 reporter.generate_comprehensive_report(..., privacy_check=True)
+
+# Standalone ARI calculation
+ari_scores = reporter.calculate_ari(real_df, synthetic_df, target_col="label")
 ```
 
 Or use standalone transformations for manual protection:
@@ -118,9 +124,6 @@ pip install calm-data-generator
 
 # Stream (River)
 pip install calm-data-generator[stream]
-
-# Time Series (Gretel)
-pip install calm-data-generator[timeseries]
 
 # Full
 pip install calm-data-generator[full]

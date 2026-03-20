@@ -27,13 +27,11 @@ class TestMigration(unittest.TestCase):
             shutil.rmtree(self.output_dir)
 
     def test_imports_no_sdv(self):
-        """Verify no SDV imports are triggered"""
-        try:
-            import sdv
-
-            self.fail("SDV should not be importable in this environment")
-        except ImportError:
-            pass
+        """Verify the library does not import SDV as a dependency."""
+        import sys
+        # SDV should not be imported as a side-effect of loading calm_data_generator
+        import calm_data_generator  # noqa: F401
+        self.assertNotIn("sdv", sys.modules, "SDV was imported as a side-effect of calm_data_generator")
 
     def test_synthcity_available(self):
         """Verify Synthcity is importable"""

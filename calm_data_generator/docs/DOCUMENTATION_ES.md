@@ -53,7 +53,6 @@ pip install calm-data-generator
 | Extra | Comando | Incluye |
 |-------|---------|---------|
 | stream | `pip install "calm-data-generator[stream]"` | River (streaming ML) |
-| timeseries | `pip install "calm-data-generator[timeseries]"` | gretel-synthetics (DGAN) |
 | full | `pip install "calm-data-generator[full]"` | Todas las dependencias anteriores |
 
 > [!NOTE]
@@ -247,7 +246,12 @@ Genera informes HTML interactivos comparando los datos reales y sintéticos.
 from calm_data_generator.generators.tabular import QualityReporter
 
 reporter = QualityReporter()
+# Genera un reporte HTML completo incluyendo métricas ARI para separabilidad de clases
 reporter.generate_report(real_df, synthetic_df, target_col='target')
+
+# Cálculo de ARI independiente para cuantificar la mejora en separación de clases
+ari_metrics = reporter.calculate_ari(real_df, synthetic_df, target_col='target')
+# Devuelve: {'ari_original': 0.95, 'ari_synthetic': 0.98, 'ari_improvement': 0.03}
 ```
 
 **Métricas Incluidas:**

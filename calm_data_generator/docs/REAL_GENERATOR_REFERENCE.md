@@ -341,8 +341,8 @@ synthetic = gen.generate(
     method="scvi",
     target_col="cell_type",  # Optional metadata column
     model_params={
-        "epochs": 100,
-        "n_latent": 10,      # Latent space dimensions
+        "epochs": 200,
+        "n_latent": 30,      # Latent space dimensions
         "n_layers": 1,       # Encoder/decoder depth
     }
 )
@@ -360,15 +360,17 @@ synthetic = gen.generate(
     n_samples=1000,
     method="scvi",
     target_col="cell_type", 
-    epochs: 100,
-    n_latent: 10,
-    n_layers: 1,
+    epochs=200,
+    n_latent=30,
+    n_layers=1,
 )
 # Returns pd.DataFrame with gene columns + metadata
-```| Parameter | Default | Description |
+```
+
+| Parameter | Default | Description |
 |-----------|---------|-------------|
-| `epochs` | 100 | Training epochs |
-| `n_latent` | 10 | Latent space dimensionality |
+| `epochs` | 200 | Training epochs |
+| `n_latent` | 30 | Latent space dimensionality |
 | `n_layers` | 1 | Number of hidden layers |
 | `differentiation_factor` | 0.0 | Latent separation factor. Uses unified 5-step process to push classes apart. |
 | `clipping_mode` | `'strict'` | Clipping strategy: `'strict'`, `'permissive'`, or `'none'`. |
@@ -491,7 +493,7 @@ new_samples = loaded_gen.generate(n_samples=500)
 
 ## Best Practices
 
-6. **Severe imbalance:** Use `smote` or `adasyn` with `target_col`.
+1. **Severe imbalance:** Use `smote` or `adasyn` with `target_col`.
 
 ---
 
@@ -531,7 +533,7 @@ synthetic_balanced = gen.generate(
 
 
 
-### Case 3: High-Performance Upsampling for Large Datasets
+### Case 2: High-Performance Upsampling for Large Datasets
 
 **Scenario:** You have a 1M row dataset and need 5M rows for stress testing a database. Deep learning methods are too slow.
 
@@ -543,8 +545,8 @@ synthetic_large = gen.generate(
     n_samples=5_000_000,
     method="lgbm",
     model_params={
-        "lgbm_n_estimators": 100,
-        "lgbm_learning_rate": 0.1
+        "n_estimators": 100,
+        "learning_rate": 0.1
     },
     minimal_report=True  # Skip heavy reporting to save time
 )
@@ -599,10 +601,6 @@ If your target column has minority classes that you want to amplify:
     gen.generate(data, target_col="status", custom_distributions={"status": {"Low": 0.7, "High": 0.3}})
     ```
     *Note: `balance_target=True` is a shortcut for `custom_distributions={"col": "balanced"}`. For extreme imbalances, Deep Learning methods like `method="ctgan"` usually provide better stability than tree-based methods.*
----
-# New Methods Documentation for REAL_GENERATOR_REFERENCE.md
-
-## Content to Add After Existing Methods Section
 
 ---
 
@@ -1067,7 +1065,7 @@ synth = gen.generate(
 
 ### Latent Space Differentiation (`differentiation_factor`)
 
-Available for `tvae`, `ctgan`, and `scvi`. Controls how far apart the class centroids are pushed in the latent (or feature) space during synthesis.
+Available for `tvae` and `scvi`. Controls how far apart the class centroids are pushed in the latent space during synthesis.
 
 ```python
 synth = gen.generate(
@@ -1086,8 +1084,7 @@ synth = gen.generate(
 | `1.5–2.0` | Moderate/strong class separation |
 | `> 2.0` | Risk of out-of-distribution samples – use with care |
 
-> **TVAE:** Shift is applied directly in the neural network latent space (mu vectors). 
-> **CTGAN:** Falls back to feature-space shift (GAN has no explicit encoder). 
+> **TVAE:** Shift is applied directly in the neural network latent space (mu vectors).
 > **scVI:** Shift applied in the `z` latent space before decoding.
 
 ---

@@ -457,35 +457,91 @@ class RealGenerator(BaseGenerator):
     def get_synthesizer_model(self) -> Any:
         """
         Returns the underlying synthesizer model used for generation.
+
+        For deep-learning methods the returned object is the high-level wrapper
+        (e.g. Synthcity plugin, scvi.model.SCVI, GEARS model).  Use
+        ``get_encoder`` / ``get_decoder`` to reach the internal networks.
+
+        Returns None if no model has been trained yet.
         """
         return self.synthesizer
 
     def get_encoder(self) -> Optional[Any]:
         """
-        Returns the encoder network for models that support it (like TVAE or scVI).
-        Returns None if not supported.
+        Returns the encoder network of the trained model, if it exists.
+
+        Supported methods and what is returned:
+            - tvae / ctgan: the Synthcity PyTorch encoder
+            - scvi: ``module.z_encoder`` (or ``module.encoder``)
+            - ddpm / timegan / timevae / fflows: the internal encoder if the
+              Synthcity plugin exposes one, otherwise None
+            - gears: None (GEARS has no explicit encoder/decoder split)
+            - gmm / copula / bayesian_network: None (no neural encoder)
+            - smote / adasyn / resample / cart / rf / lgbm: None
+
+        Returns:
+            The encoder module, or None if not available.
         """
-        if self.method == "tvae" and self.synthesizer:
-            return self.synthesizer.model.model.encoder
-        elif self.method == "scvi" and self.synthesizer:
-            # En scVI, el encoder vive dentro del módulo principal (VAE)
-            if hasattr(self.synthesizer, "module") and hasattr(self.synthesizer.module, "z_encoder"):
-                return self.synthesizer.module.z_encoder
-            elif hasattr(self.synthesizer, "module"):
-                # Algunos modelos de scVI más recientes agrupan esto diferente
-                return getattr(self.synthesizer.module, "encoder", None)
+        if not self.synthesizer:
+            return None
+
+        if self.method in ("tvae", "ctgan"):
+            try:
+                return self.synthesizer.model.model.encoder
+            except AttributeError:
+                return None
+
+        if self.method == "scvi":
+            module = getattr(self.synthesizer, "module", None)
+            if module is None:
+                return None
+            return getattr(module, "z_encoder", None) or getattr(module, "encoder", None)
+
+        if self.method in ("ddpm", "timegan", "timevae", "fflows"):
+            try:
+                return self.synthesizer.model.model.encoder
+            except AttributeError:
+                return None
+
         return None
 
     def get_decoder(self) -> Optional[Any]:
         """
-        Returns the decoder network for models that support it (like TVAE or scVI).
-        Returns None if not supported.
+        Returns the decoder network of the trained model, if it exists.
+
+        Supported methods and what is returned:
+            - tvae / ctgan: the Synthcity PyTorch decoder
+            - scvi: ``module.decoder``
+            - ddpm / timegan / timevae / fflows: the internal decoder if the
+              Synthcity plugin exposes one, otherwise None
+            - gears: None (GEARS has no explicit encoder/decoder split)
+            - gmm / copula / bayesian_network: None (no neural decoder)
+            - smote / adasyn / resample / cart / rf / lgbm: None
+
+        Returns:
+            The decoder module, or None if not available.
         """
-        if self.method == "tvae" and self.synthesizer:
-            return self.synthesizer.model.model.decoder
-        elif self.method == "scvi" and self.synthesizer:
-            if hasattr(self.synthesizer, "module") and hasattr(self.synthesizer.module, "decoder"):
-                return self.synthesizer.module.decoder
+        if not self.synthesizer:
+            return None
+
+        if self.method in ("tvae", "ctgan"):
+            try:
+                return self.synthesizer.model.model.decoder
+            except AttributeError:
+                return None
+
+        if self.method == "scvi":
+            module = getattr(self.synthesizer, "module", None)
+            if module is None:
+                return None
+            return getattr(module, "decoder", None)
+
+        if self.method in ("ddpm", "timegan", "timevae", "fflows"):
+            try:
+                return self.synthesizer.model.model.decoder
+            except AttributeError:
+                return None
+
         return None
 
     def _get_model_params(
@@ -759,7 +815,20 @@ class RealGenerator(BaseGenerator):
         custom_distributions: Optional[Dict] = None,
         **model_kwargs,
     ) -> pd.DataFrame:
-        """Synthesizes data using TVAE via Synthcity."""
+        """
+        Synthesizes data using TVAE via Synthcity.
+        
+        Args:
+            data: Input DataFrame.
+            n_samples: Number of synthetic samples to generate.
+            target_col: Optional target column for latent differentiation.
+            custom_distributions: Optional distributions to follow.
+            **model_kwargs: Parameters for TVAE and v1.2.0 logic:
+                - differentiation_factor (float): latent space separation factor.
+                - clipping_mode (str): 'strict', 'permissive', or 'none'.
+                - clipping_factor (float): tolerance for permissive clipping.
+                - epochs (int): number of training epochs.
+        """
         self.logger.info("Starting TVAE synthesis via Synthcity...")
         self._patch_synthcity_encoder()  # Apply patch
         if "epochs" in model_kwargs:
@@ -773,7 +842,7 @@ class RealGenerator(BaseGenerator):
             syn.fit(data)
         except Exception as e:
             self.logger.error(f"TVAE training failed: {e}")
-            return syn.generate(count=n_samples).dataframe() if syn.fitted else None
+            return None
 
         self.synthesizer = syn
         self.method = "tvae"
@@ -821,7 +890,9 @@ class RealGenerator(BaseGenerator):
         self.logger.info(f"Applying unified latent differentiation for {method} (factor: {differentiation_factor})")
         
         clipping_mode = kwargs.get("clipping_mode", "strict")
-        clipping_factor = kwargs.get("clipping_factor", 0.1)
+        clipping_factor = kwargs.get("clipping_factor", None)
+        clip_min = kwargs.get("clip_min", None)
+        clip_max = kwargs.get("clip_max", None)
 
         try:
             # Step 1: Generate Latent Space z(d)
@@ -829,67 +900,141 @@ class RealGenerator(BaseGenerator):
                 tabular_model = syn.model
                 pytorch_model = tabular_model.model
                 pytorch_model.eval()
-                
+
                 data_encoded = tabular_model.encode(data)
                 data_tensor = torch.tensor(data_encoded.values, dtype=torch.float32).to(pytorch_model.device)
-                
+
                 unique_classes = data[target_col].unique()
                 if len(unique_classes) != 2:
                     self.logger.warning(f"Differentiation works best with 2 classes, found {len(unique_classes)}. Using first two.")
-                
+
                 control_val = unique_classes[0]
                 case_val = unique_classes[1]
-                
-                cond_labels = (data[target_col] == case_val).astype(int).values
-                cond_tensor = torch.nn.functional.one_hot(
-                    torch.tensor(cond_labels), num_classes=2
-                ).float().to(pytorch_model.device)
-                
-                input_tensor = torch.cat([data_tensor, cond_tensor], dim=1)
+
+                # The TVAE encoder was trained on encoded features + conditioning dims.
+                # If the model has conditional dimensions, we must append them
+                # so the input size matches what the encoder expects.
+                cond_dim = getattr(pytorch_model, "n_units_conditional", 0)
                 with torch.no_grad():
-                    encoder_out = pytorch_model.encoder(input_tensor)
+                    cond_tensor_enc = None
+                    if cond_dim > 0:
+                        label_to_idx = {str(control_val): 0, str(case_val): 1}
+                        labels_enc = data[target_col].values
+                        label_indices = torch.tensor(
+                            [label_to_idx.get(str(l), 0) for l in labels_enc],
+                            dtype=torch.long,
+                            device=pytorch_model.device,
+                        )
+                        cond_tensor_enc = torch.zeros(
+                            len(labels_enc), cond_dim, device=pytorch_model.device
+                        )
+                        cond_tensor_enc.scatter_(1, label_indices.unsqueeze(1).clamp(max=cond_dim - 1), 1.0)
+                        data_tensor = torch.cat([data_tensor, cond_tensor_enc], dim=1)
+
+                    encoder_out = pytorch_model.encoder(data_tensor)
                     mu = encoder_out[0] if isinstance(encoder_out, (tuple, list)) else encoder_out
                     z = mu
-                
+
             elif method == "scvi":
                 model = syn
-                z = torch.tensor(model.get_latent_representation(), dtype=torch.float32).to(model.device)
-                unique_classes = data[target_col].unique()
+                device = model.device if hasattr(model, "device") else model.module.device
+                z = torch.tensor(model.get_latent_representation(), dtype=torch.float32).to(device)
+                # Support both AnnData and DataFrame as input
+                if hasattr(data, "obs"):
+                    unique_classes = data.obs[target_col].unique()
+                else:
+                    unique_classes = data[target_col].unique()
                 control_val = unique_classes[0]
                 case_val = unique_classes[1]
             else:
                 return syn.generate(count=n_samples).dataframe()
 
             # Step 2: Calculate Centroids
-            labels = data[target_col].values
-            mask_case = (labels == str(case_val)) if method == "scvi" else (labels == case_val)
-            mask_control = (labels == str(control_val)) if method == "scvi" else (labels == control_val)
-            
+            if method == "scvi" and hasattr(data, "obs"):
+                labels = data.obs[target_col].astype(str).values
+                mask_case = labels == str(case_val)
+                mask_control = labels == str(control_val)
+            elif method == "scvi":
+                labels = data[target_col].astype(str).values
+                mask_case = labels == str(case_val)
+                mask_control = labels == str(control_val)
+            else:
+                labels = data[target_col].values
+                mask_case = labels == case_val
+                mask_control = labels == control_val
+
+            self.logger.debug(
+                f"[Differentiation] unique_classes={unique_classes}, "
+                f"case_val={case_val!r} ({type(case_val).__name__}), "
+                f"control_val={control_val!r} ({type(control_val).__name__}), "
+                f"labels sample={labels[:5]}, mask_case sum={mask_case.sum()}, mask_control sum={mask_control.sum()}"
+            )
+
+            if mask_case.sum() == 0 or mask_control.sum() == 0:
+                raise ValueError(
+                    f"Empty mask for differentiation: mask_case={mask_case.sum()}, "
+                    f"mask_control={mask_control.sum()}. "
+                    f"unique_classes={unique_classes}, labels sample={labels[:5]}"
+                )
+
             cmca = z[mask_case].mean(dim=0)
             cmco = z[mask_control].mean(dim=0)
-            
-            if torch.isnan(cmca).any() or torch.isnan(cmco).any():
-                self.logger.warning("Centroid calculation returned NaNs. Skipping differentiation.")
-                return syn.generate(count=n_samples).dataframe()
 
-            # Step 3 & 4: Calculate Distance Vector and Enhance Latent Space
+            if torch.isnan(cmca).any() or torch.isnan(cmco).any():
+                raise ValueError("Centroid calculation returned NaNs after masking.")
+
+            # Step 3: Calculate distance vector
+            distance_vector_case = cmca - cmco       # direction to push case samples
+            distance_vector_control = cmco - cmca    # direction to push control samples
+
+            self.logger.info(f"[Differentiation] Centroid '{case_val}' (case):    {cmca.cpu().numpy().round(4)}")
+            self.logger.info(f"[Differentiation] Centroid '{control_val}' (control): {cmco.cpu().numpy().round(4)}")
+            self.logger.info(f"[Differentiation] Distance vector (case→control):  {distance_vector_case.cpu().numpy().round(4)}")
+            self.logger.info(f"[Differentiation] ||distance||: {torch.norm(distance_vector_case).item():.4f}")
+            self.logger.info(f"[Differentiation] Shift applied: factor={differentiation_factor} × ||d||={torch.norm(distance_vector_case).item():.4f} = {differentiation_factor * torch.norm(distance_vector_case).item():.4f}")
+
+            # Step 4: Enhance Latent Space — push classes apart
             z_prime = z.clone()
-            z_prime[mask_case] += differentiation_factor * (cmca - cmco)
-            z_prime[mask_control] += differentiation_factor * (cmco - cmca)
-            
+            z_prime[mask_case] += differentiation_factor * distance_vector_case
+            z_prime[mask_control] += differentiation_factor * distance_vector_control
+
+            cmca_prime = z_prime[mask_case].mean(dim=0)
+            cmco_prime = z_prime[mask_control].mean(dim=0)
+            self.logger.info(f"[Differentiation] New centroid '{case_val}':    {cmca_prime.cpu().numpy().round(4)}")
+            self.logger.info(f"[Differentiation] New centroid '{control_val}': {cmco_prime.cpu().numpy().round(4)}")
+            self.logger.info(f"[Differentiation] New ||distance||: {torch.norm(cmca_prime - cmco_prime).item():.4f}")
+
             # Step 5: Decode
             if method == "tvae":
                 with torch.no_grad():
-                    decoder_input = torch.cat([z_prime, cond_tensor], dim=1)
-                    reconstructed_tensor = pytorch_model.decoder(decoder_input)
-                
+
+                    # Synthcity's Decoder.forward(X, cond) expects latent and
+                    # conditioning SEPARATELY — it concatenates them internally.
+                    # n_units_conditional lives on the VAE (pytorch_model), not on the Decoder.
+                    cond_dim = getattr(pytorch_model, "n_units_conditional", 0)
+
+                    cond_tensor = None
+                    if cond_dim > 0:
+                        label_to_idx = {str(control_val): 0, str(case_val): 1}
+                        label_indices = torch.tensor(
+                            [label_to_idx.get(str(l), 0) for l in labels],
+                            dtype=torch.long,
+                            device=pytorch_model.device,
+                        )
+                        cond_tensor = torch.zeros(
+                            len(labels), cond_dim, device=pytorch_model.device
+                        )
+                        cond_tensor.scatter_(1, label_indices.unsqueeze(1).clamp(max=cond_dim - 1), 1.0)
+
+                    reconstructed_tensor = pytorch_model.decoder(z_prime, cond_tensor)
+
                 reconstructed_df = pd.DataFrame(
                     reconstructed_tensor.cpu().numpy(),
                     columns=data_encoded.columns
                 )
                 synth_df = syn.model.decode(reconstructed_df)
                 synth_df[target_col] = data[target_col].values
-                
+
             elif method == "scvi":
                 with torch.no_grad():
                     # Preserve library size logic
@@ -903,17 +1048,17 @@ class RealGenerator(BaseGenerator):
                         orig_log_lib = np.log(orig_lib_size + 1e-8)
                     else:
                         orig_log_lib = np.zeros(len(data))
-                    
+
                     library_tensor = torch.tensor(orig_log_lib, dtype=torch.float32).unsqueeze(1).to(model.device)
                     batch_index = torch.zeros(len(z), 1, dtype=torch.long).to(model.device)
-                    
+
                     y_tensor = None
                     if getattr(model.module, "dispersion", "gene") == "gene-label":
                         label_registry = model.adata_manager.get_state_registry("labels")
                         cat_mapping = label_registry.categorical_mapping
                         label_map = {str(cat): i for i, cat in enumerate(cat_mapping)}
                         y_tensor = torch.tensor(
-                            [label_map[str(m)] for m in labels], 
+                            [label_map[str(m)] for m in labels],
                             dtype=torch.long
                         ).unsqueeze(1).to(model.device)
 
@@ -925,7 +1070,7 @@ class RealGenerator(BaseGenerator):
                     )
                     px_dist = gen_outputs["px"]
                     synth_values = px_dist.sample().cpu().numpy() if hasattr(px_dist, "sample") else px_dist.mean.cpu().numpy()
-                
+
                 # Use var_names from adata if possible, or columns from data
                 col_names = data.var_names if hasattr(data, "var_names") else [c for c in data.columns if c != target_col]
                 synth_df = pd.DataFrame(synth_values, columns=col_names)
@@ -939,33 +1084,69 @@ class RealGenerator(BaseGenerator):
                     random_state=self.random_state
                 ).reset_index(drop=True)
 
-            # Flexible Clipping and Integer Preservation
-            if clipping_mode != "none":
-                numeric_cols = synth_df.select_dtypes(include=[np.number]).columns
-                for col in numeric_cols:
-                    if col in data.columns:
-                        orig_min = data[col].min()
-                        orig_max = data[col].max()
-                        
-                        if clipping_mode == "strict":
-                            low, high = orig_min, orig_max
-                        else:  # permissive
+            # Clipping and Integer Preservation
+            numeric_cols = synth_df.select_dtypes(include=[np.number]).columns
+            # Resolve column access for both DataFrame and AnnData
+            data_columns = data.var_names if hasattr(data, "var_names") else data.columns
+            for col in numeric_cols:
+                if col in data_columns:
+                    col_data = data[:, col].X if hasattr(data, "var_names") else data[col]
+                    if hasattr(col_data, "toarray"):
+                        col_data = col_data.toarray().ravel()
+                    elif hasattr(col_data, "A1"):
+                        col_data = col_data.A1
+                    col_series = pd.Series(col_data).dropna()
+                    orig_min = col_series.min()
+                    orig_max = col_series.max()
+
+                    if clipping_mode == "none":
+                        # No clipping, only preserve integer dtype
+                        if pd.api.types.is_integer_dtype(col_series):
+                            synth_df[col] = synth_df[col].round().astype(int)
+                        continue
+
+                    col_clip_min = clip_min.get(col) if isinstance(clip_min, dict) else clip_min
+                    col_clip_max = clip_max.get(col) if isinstance(clip_max, dict) else clip_max
+
+                    if col_clip_min is None and col_clip_max is None:
+                        if clipping_mode == "permissive" and clipping_factor is not None:
                             col_range = orig_max - orig_min
                             low = orig_min - (clipping_factor * col_range)
                             high = orig_max + (clipping_factor * col_range)
-                        
-                        synth_df[col] = synth_df[col].clip(lower=low, upper=high)
-                        
-                        if pd.api.types.is_integer_dtype(data[col]):
-                            synth_df[col] = synth_df[col].round().astype(int)
+                        else:  # strict: original range
+                            low, high = orig_min, orig_max
+                        col_clip_min, col_clip_max = low, high
+
+                    synth_df[col] = synth_df[col].clip(lower=col_clip_min, upper=col_clip_max)
+
+                    if pd.api.types.is_integer_dtype(col_series):
+                        synth_df[col] = synth_df[col].round().astype(int)
 
             return synth_df
 
+        except ValueError as e:
+            raise
         except Exception as e:
-            self.logger.error(f"Unified differentiation failed for {method}: {e}")
+            self.logger.error(f"Unified differentiation failed for {method}: {e}. Falling back to standard generation.")
             if method == "scvi":
-                # scVI doesn't have a direct .generate() on the model, return None to signal failure
-                return None
+                # Fallback: sample from prior without differentiation
+                self.logger.warning("scVI fallback: generating from standard latent prior (no differentiation).")
+                import scvi as _scvi_mod  # noqa: F401
+                n_latent = syn.module.n_latent
+                latent_samples = np.random.randn(n_samples, n_latent).astype(np.float32)
+                latent_tensor = torch.tensor(latent_samples).to(syn.device)
+                mean_lib = float(np.log(10000))
+                library_tensor = torch.full((n_samples, 1), mean_lib, dtype=torch.float32).to(syn.device)
+                batch_index = torch.zeros(n_samples, 1, dtype=torch.long).to(syn.device)
+                with torch.no_grad():
+                    y_fallback = None
+                    if getattr(syn.module, "dispersion", "gene") == "gene-label":
+                        y_fallback = torch.zeros(n_samples, 1, dtype=torch.long).to(syn.device)
+                    gen_out = syn.module.generative(z=latent_tensor, library=library_tensor, batch_index=batch_index, y=y_fallback)
+                    px_dist = gen_out["px"]
+                    vals = px_dist.sample().cpu().numpy() if hasattr(px_dist, "sample") else px_dist.mean.cpu().numpy()
+                col_names = syn.adata.var_names.tolist()
+                return pd.DataFrame(vals, columns=col_names)
             return syn.generate(count=n_samples).dataframe()
 
 
@@ -1090,6 +1271,8 @@ class RealGenerator(BaseGenerator):
     ) -> pd.DataFrame:
         """Synthesizes data by resampling from the original dataset, with optional weighting."""
         self.logger.info("Starting synthesis by resampling...")
+        self.synthesizer = None
+        self.method = "resample"
         if not custom_distributions:
             return data.sample(
                 n=n_samples, replace=True, random_state=self.random_state
@@ -1163,6 +1346,8 @@ class RealGenerator(BaseGenerator):
             k_neighbors = kwargs.get("k_neighbors", 5)
             smote = SMOTE(k_neighbors=k_neighbors, random_state=self.random_state)
             X_res, y_res = smote.fit_resample(X, y)
+            self.synthesizer = smote
+            self.method = "smote"
             data_res = pd.concat([X_res, y_res], axis=1)
 
             if len(data_res) < n_samples:
@@ -1206,6 +1391,8 @@ class RealGenerator(BaseGenerator):
             n_neighbors = kwargs.get("n_neighbors", 5)
             adasyn = ADASYN(n_neighbors=n_neighbors, random_state=self.random_state)
             X_res, y_res = adasyn.fit_resample(X, y)
+            self.synthesizer = adasyn
+            self.method = "adasyn"
             data_res = pd.concat([X_res, y_res], axis=1)
 
             if len(data_res) < n_samples:
@@ -1291,6 +1478,8 @@ class RealGenerator(BaseGenerator):
         # Train
         self.logger.info(f"Training TabDDPM for {n_iter} epochs...")
         plugin.fit(loader)
+        self.synthesizer = plugin
+        self.method = "ddpm"
 
         # Generate
         self.logger.info(f"Generating {n_samples} synthetic samples...")
@@ -1439,6 +1628,8 @@ class RealGenerator(BaseGenerator):
         # Train
         self.logger.info(f"Training TimeGAN for {n_iter} epochs...")
         plugin.fit(loader)
+        self.synthesizer = plugin
+        self.method = "timegan"
 
         # Generate
         self.logger.info(f"Generating {n_samples} synthetic sequences...")
@@ -1579,6 +1770,8 @@ class RealGenerator(BaseGenerator):
         # Train
         self.logger.info(f"Training TimeVAE for {n_iter} epochs...")
         plugin.fit(loader)
+        self.synthesizer = plugin
+        self.method = "timevae"
 
         # Generate
         self.logger.info(f"Generating {n_samples} synthetic sequences...")
@@ -1707,6 +1900,8 @@ class RealGenerator(BaseGenerator):
 
         self.logger.info(f"Training FourierFlows for {n_iter} epochs...")
         plugin.fit(loader)
+        self.synthesizer = plugin
+        self.method = "fflows"
         self.logger.info(f"Generating {n_samples} synthetic sequences...")
         synth = plugin.generate(count=n_samples)
         synth_df = synth.dataframe()
@@ -1827,7 +2022,12 @@ class RealGenerator(BaseGenerator):
             data: DataFrame or AnnData with numeric expression values
             n_samples: Number of synthetic samples to generate
             target_col: Optional column to preserve as metadata (will be excluded from training)
-            **kwargs: Additional parameters passed to scVI model (n_latent, n_layers, etc.)
+            **kwargs: Additional parameters passed to scVI model:
+                - differentiation_factor (float): Factor for latent space separation (v1.2.0).
+                - clipping_mode (str): 'strict', 'permissive', or 'none'.
+                - clipping_factor (float): % of range for permissive clipping.
+                - use_latent_sampling (bool): If True, samples from real data latent space.
+                - n_latent (int): Size of latent space (default: 30).
 
         Returns:
             DataFrame with synthetic samples
@@ -1840,12 +2040,20 @@ class RealGenerator(BaseGenerator):
         clipping_factor = kwargs.pop("clipping_factor", 0.1)
 
         try:
+            import torch
+            # Pre-import torchvision before scvi/lightning to avoid circular import
+            # (torchvision._meta_registrations depends on torchvision.extension being
+            # fully initialized before lightning/torchmetrics trigger a re-import)
+            try:
+                import torchvision
+            except Exception:
+                pass
             import anndata
             import scvi
         except ImportError as e:
             raise ImportError(
-                f"scvi-tools and anndata are required for scVI synthesis. "
-                f"Install with: pip install scvi-tools anndata. Original error: {e}"
+                f"scvi-tools, anndata and torch are required for scVI synthesis. "
+                f"Install with: pip install scvi-tools anndata torch. Original error: {e}"
             )
 
         # Create or use AnnData object
@@ -1989,8 +2197,11 @@ class RealGenerator(BaseGenerator):
             return None
 
         model.module.eval()  # Ensure model is in eval mode for generation
+        self.synthesizer = model
+        self.method = "scvi"
         # Decide generation strategy based on parameters
         use_latent_sampling = kwargs.get("use_latent_sampling", True)
+        synthetic_metadata = None
 
         if differentiation_factor > 0.0 and target_col:
             return self._apply_unified_latent_differentiation(
@@ -2112,7 +2323,7 @@ class RealGenerator(BaseGenerator):
         if target_col and target_col in (
             data.obs.columns if hasattr(data, "obs") else data.columns
         ):
-            if 'synthetic_metadata' in locals() and synthetic_metadata is not None:
+            if synthetic_metadata is not None:
                 synth_df[target_col] = synthetic_metadata
             else:
                 # metadata_cols might be empty if adata was passed
@@ -2269,6 +2480,9 @@ class RealGenerator(BaseGenerator):
                         )
                     else:
                         raise ve
+
+                self.synthesizer = gears_model
+                self.method = "gears"
 
                 # Generate predictions for specified perturbations
                 # Format perturbations as list of lists
@@ -2883,7 +3097,12 @@ class RealGenerator(BaseGenerator):
             save_dataset (bool): If True, saves the generated dataset to a CSV file.
             drift_injection_config (Optional[List[Dict]]): List of drift injection configurations.
             dynamics_config (Optional[Dict]): Configuration for dynamics injection (feature evolution, target construction).
-            **kwargs: Hyperparameters for the models
+            **kwargs: Hyperparameters for the models. 
+                Common v1.2.0 parameters:
+                - differentiation_factor (float): Enhances class separation in latent space (TVAE/scVI).
+                - clipping_mode (str): 'strict' (default), 'permissive', or 'none' for output range control.
+                - clipping_factor (float): Tolerance factor for 'permissive' clipping (default 0.1).
+                - use_latent_sampling (bool): For scVI, whether to sample from real data's latent space.
             adversarial_validation (bool): If True, runs the DiscriminatorReporter to compute adversarial validation metrics (AUC).
 
         Returns:

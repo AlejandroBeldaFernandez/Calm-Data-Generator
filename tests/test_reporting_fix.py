@@ -1,12 +1,13 @@
 import pandas as pd
 import numpy as np
+import tempfile
+import os
 from calm_data_generator.generators.tabular import RealGenerator
 import pytest
 
 
 def test_reporting_generation():
     """Explicitly test report generation with new dependencies."""
-    # Create simple data
     df = pd.DataFrame(
         {
             "A": np.random.normal(0, 1, 100),
@@ -17,11 +18,10 @@ def test_reporting_generation():
 
     gen = RealGenerator(auto_report=True)
 
-    # Generate report explicitly via internal method or by triggering generation with auto_report=True
-    # We will use the public API generate() which triggers report if auto_report=True
-    print("Starting generation with reporting...")
-    gen.generate(df, n_samples=10, method="cart", target_col="B")
-    print("Generation and reporting finished successfully.")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result = gen.generate(df, n_samples=10, method="cart", target_col="B", output_dir=tmpdir)
+        assert result is not None, "generate() returned None"
+        assert len(result) == 10
 
 
 if __name__ == "__main__":

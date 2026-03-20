@@ -95,7 +95,7 @@ class TestImbalance(unittest.TestCase):
 
             # Check counts
             counts = synth_df["target"].value_counts(normalize=True)
-            print(f"\nImforced Imbalance Output Counts:\n{counts}")
+            print(f"\nImposed Imbalance Output Counts:\n{counts}")
 
             # Should be roughly 0.9 for class 0
             self.assertTrue(

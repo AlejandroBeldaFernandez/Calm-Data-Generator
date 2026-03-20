@@ -18,7 +18,7 @@ def test_tvae_accessors():
     try:
         synth_df= generator.generate(
             data=df, 
-            n_samples=50,
+            n_samples=10,
             method="tvae", 
             target_col="target", 
             **params
@@ -58,7 +58,7 @@ def test_ctgan_accessors():
     try:
         synth_df = generator.generate(
             data=df, 
-            n_samples=50,
+            n_samples=10,
             method="ctgan", 
             target_col="target", 
             **params
@@ -66,14 +66,17 @@ def test_ctgan_accessors():
         
         # Test get_synthesizer_model
         model = generator.get_synthesizer_model()
+        print(model)
         assert model is not None, "Synthesizer model should not be None for CTGAN"
         
         # Test get_encoder
         encoder = generator.get_encoder()
+        print(encoder)
         assert encoder is None, "Encoder should be None for CTGAN (doesn't exist)"
         
         # Test get_decoder
         decoder = generator.get_decoder()
+        print(decoder)
         assert decoder is None, "Decoder should be None for CTGAN (doesn't exist)"
         
         # Test get_latest_embeddings

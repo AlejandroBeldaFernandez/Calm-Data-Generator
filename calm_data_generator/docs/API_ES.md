@@ -27,6 +27,11 @@ from calm_data_generator.generators.tabular import RealGenerator, QualityReporte
 | `fflows` | FourierFlows (series periódicas) |
 | `scvi` | scVI (Single-Cell VI) |
 
+**Nuevos Parámetros (v1.2.0):**
+- `differentiation_factor` (float): Aumenta la separación de clases en el espacio latente (solo TVAE/scVI).
+- `clipping_mode` (str): `'strict'`, `'permissive'`, o `'none'` para manejar los rangos de salida.
+- `use_latent_sampling` (bool): Para scVI, muestrea desde el espacio latente de datos reales.
+
 
 
 
@@ -35,7 +40,7 @@ from calm_data_generator.generators.tabular import RealGenerator, QualityReporte
 ### generators.clinical - Datos Clínicos
 
 ```python
-from calm_data_generator.generators.clinical import ClinicalDataGenerator, DateConfig
+from calm_data_generator.generators.clinical import ClinicalDataGenerator
 ```
 
 **Métodos:**
@@ -97,10 +102,14 @@ from calm_data_generator.generators.dynamics import ScenarioInjector
 
 ### privacy - Transformaciones de Privacidad (Integrado)
 
-Las funciones de privacidad están integradas en el `QualityReporter`. Puedes evaluar la privacidad usando:
+Las funciones de privacidad están integradas en el `QualityReporter`. Puedes evaluar calidad y privacidad usando:
 
 ```python
+# Reporte Completo de Calidad (incluyendo métricas ARI para separabilidad)
 reporter.generate_comprehensive_report(..., privacy_check=True)
+
+# Cálculo de ARI independiente
+ari_scores = reporter.calculate_ari(real_df, synthetic_df, target_col="label")
 ```
 
 O usar transformaciones manuales para protección:
@@ -112,14 +121,11 @@ O usar transformaciones manuales para protección:
 
 ```bash
 # Básica
-pip install calm_data_generator
+pip install calm-data-generator
 
 # Stream (River)
-pip install calm_data_generator[stream]
-
-# Series Temporales (Gretel)
-pip install calm_data_generator[timeseries]
+pip install "calm-data-generator[stream]"
 
 # Completa
-pip install calm_data_generator[full]
+pip install "calm-data-generator[full]"
 ```

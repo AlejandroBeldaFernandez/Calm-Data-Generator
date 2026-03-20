@@ -171,7 +171,7 @@ pip install "calm-data-generator[full]"
 ```
 
 > [!NOTE]
-> **Nota de Rendimiento y Estabilidad**: Hemos optimizado el árbol de dependencias en la versión 1.0.0 bloqueando versiones específicas como `scgen==2.1.1` (commit `d79e1f`), `pydantic`, `xgboost` y `cloudpickle`. Esto mejora la compatibilidad y reduce problemas de instalación. 🚀
+> **Nota de Rendimiento y Estabilidad**: Hemos optimizado el árbol de dependencias desde la versión 1.0.0 bloqueando versiones específicas como `pydantic`, `xgboost` y `cloudpickle`. Esto mejora la compatibilidad y reduce problemas de instalación. 🚀
 
 **Desde fuente (GitHub - Últimas Actualizaciones):**
 Usa este método para obtener los últimos arreglos y funcionalidades aún no disponibles en PyPI.

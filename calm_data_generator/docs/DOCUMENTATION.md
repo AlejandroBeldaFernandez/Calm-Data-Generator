@@ -5,7 +5,7 @@
 1. [Installation](#installation)
 2. [Module Overview](#module-overview)
 3. [RealGenerator](#realgenerator)
-4. [ClinicalDataGenerator](#clinicgenerator)
+4. [ClinicalDataGenerator](#clinicaldatagenerator)
 5. [StreamGenerator](#streamgenerator)
 6. [DriftInjector](#driftinjector)
 7. [ScenarioInjector](#scenarioinjector)
@@ -50,7 +50,6 @@ pip install calm-data-generator
 | Extra | Command | Includes |
 |-------|---------|----------|
 | stream | `pip install "calm-data-generator[stream]"` | River (streaming ML) |
-| timeseries | `pip install "calm-data-generator[timeseries]"` | gretel-synthetics (DGAN) |
 | full | `pip install "calm-data-generator[full]"` | All optional dependencies above |
 
 > [!NOTE]
@@ -161,19 +160,21 @@ synthetic = gen.generate(
 )
 ```
 
+#### Single-Cell Methods
 
-
+```python
 # scVI - Variational Autoencoder for single-cell/RNA-seq data
 synthetic = gen.generate(
     expression_df, 1000,
     method='scvi',
-    target_col='cell_type',  
+    target_col='cell_type',
     differentiation_factor=2.0, # NEW: Enhance class separability
     clipping_mode='strict',     # NEW: Choose clipping strategy
     use_latent_sampling=True    # Higher biological fidelity
 )
+```
 
-
+```python
 # GEARS - Graph-based Perturbation Prediction
 synthetic = gen.generate(
     expression_df, 500,
@@ -183,6 +184,7 @@ synthetic = gen.generate(
     batch_size=32,
     device='cpu'
 )
+```
 
 > **IMPORTANT:** GEARS requires installation from source and specific PyTorch versions.
 > Ensure you have installed it via:
@@ -598,9 +600,20 @@ Privacy features are now available through:
 
 ```python
 from calm_data_generator.generators.tabular import QualityReporter
-from calm_data_generator.generators.configs import ReportConfig
 
 reporter = QualityReporter()
+# Generates comprehensive HTML report including ARI metrics for class separability
+reporter.generate_report(real_df, synthetic_df, target_col='target')
+
+# Standalone ARI calculation to quantify class separation improvement
+ari_metrics = reporter.calculate_ari(real_df, synthetic_df, target_col='target')
+# Returns: {'ari_original': 0.95, 'ari_synthetic': 0.98, 'ari_improvement': 0.03}
+```
+
+Example with explicit `ReportConfig`:
+```python
+from calm_data_generator.generators.configs import ReportConfig
+
 reporter.generate_comprehensive_report(
     real_df=original_df,
     synthetic_df=synthetic_df,
@@ -685,22 +698,22 @@ gen.generate_blocks_simple(
 
 ```bash
 # List tutorials
-calm_data_generator tutorials
+calm-data-generator tutorials
 
 # View tutorial
-calm_data_generator tutorials show 1
+calm-data-generator tutorials show 1
 
 # Run tutorial
-calm_data_generator tutorials run 1
+calm-data-generator tutorials run 1
 
 # Show paths
-calm_data_generator tutorials path
+calm-data-generator tutorials path
 
 # Show version
-calm_data_generator version
+calm-data-generator version
 
 # Access docs
-calm_data_generator docs
+calm-data-generator docs
 ```
 
 ---

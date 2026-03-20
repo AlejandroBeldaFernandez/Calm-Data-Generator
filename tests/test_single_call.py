@@ -48,13 +48,14 @@ def test_single_call_with_drift():
     # CORRECT FORMAT: List of DriftConfig objects
     drift_config = [
         DriftConfig(
-            method="inject_gradual_drift",
+            method="inject_feature_drift_gradual",
             params={
-                "columns": ["score"],
-                "drift_type": "mean_shift",
+                "feature_cols": ["score"],
+                "drift_type": "shift",
                 "drift_magnitude": 0.5,
                 "start_index": 20,
-                "end_index": 50,
+                "center": 35,
+                "width": 20,
             },
         )
     ]
@@ -78,27 +79,12 @@ def test_single_call_with_drift():
             ],
         )
 
-        if result is not None:
-            print(f"\n   ✓ Generated data shape: {result.shape}")
-            print(f"   ✓ Columns: {list(result.columns)}")
-            print(f"   ✓ Age range: {result['age'].min()} - {result['age'].max()}")
-            print(f"   ✓ Score mean: {result['score'].mean():.2f}")
-
-            # Check if files were saved
-            saved_files = os.listdir(tmpdir)
-            print(f"   ✓ Files saved: {saved_files}")
-
-            print("\n" + "=" * 60)
-            print("✅ SINGLE CALL TEST PASSED!")
-            print("   Generated data + injected drift + saved report")
-            print("   All in ONE method call!")
-            print("=" * 60)
-            return True
-        else:
-            print("   ⚠ Result is None")
-            return False
+        assert result is not None, "generate() returned None"
+        assert len(result) == 50
+        assert "age" in result.columns
+        assert "score" in result.columns
+        assert len(os.listdir(tmpdir)) > 0
 
 
 if __name__ == "__main__":
-    success = test_single_call_with_drift()
-    exit(0 if success else 1)
+    test_single_call_with_drift()

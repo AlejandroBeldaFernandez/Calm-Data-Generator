@@ -182,8 +182,8 @@ synthetic = gen.generate(
 
 | Parámetro | Descripción |
 |-----------|-------------|
-| `epochs` | Épocas de entrenamiento (default: 100) |
-| `n_latent` | Dimensionalidad del espacio latente (default: 10) |
+| `epochs` | Épocas de entrenamiento (default: 200) |
+| `n_latent` | Dimensionalidad del espacio latente (default: 30) |
 | `n_layers` | Número de capas ocultas (default: 1) |
 | `differentiation_factor` | 0.0 | Factor de separación latente. Utiliza el proceso unificado de 5 pasos para empujar las clases. |
 | `clipping_mode` | `'strict'` | Estrategia de recorte: `'strict'`, `'permissive'`, o `'none'`. |
@@ -798,7 +798,7 @@ synth = gen.generate(
 
 ### Diferenciación en el Espacio Latente (`differentiation_factor`)
 
-Disponible para `tvae`, `ctgan` y `scvi`. Controla cuánto se separan los centroides de clase en el espacio latente (o de características) durante la síntesis.
+Disponible para `tvae` y `scvi`. Controla cuánto se separan los centroides de clase en el espacio latente durante la síntesis. (Para `ctgan`, este parámetro se ignora actualmente).
 
 ```python
 synth = gen.generate(
@@ -817,8 +817,7 @@ synth = gen.generate(
 | `1.5–2.0` | Separación moderada/fuerte |
 | `> 2.0` | Riesgo de muestras fuera de distribución |
 
-> **TVAE:** El desplazamiento se aplica directamente en el espacio latente neuronal (vectores mu). 
-> **CTGAN:** Usa desplazamiento en el espacio de características (GAN no tiene encoder explícito). 
+> **TVAE:** El desplazamiento se aplica directamente en el espacio latente neuronal (vectores mu).
 > **scVI:** El desplazamiento se aplica en el espacio latente `z` antes de decodificar.
 
 ---

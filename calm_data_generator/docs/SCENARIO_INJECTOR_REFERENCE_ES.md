@@ -1,6 +1,6 @@
 # ScenarioInjector - Referencia Completa
 
-**Ubicación:** `calm_data_generator.injectors.ScenarioInjector`
+**Ubicación:** `calm_data_generator.generators.dynamics.ScenarioInjector`
 
 El `ScenarioInjector` simula **dinámicas temporales** y **patrones evolutivos** en datasets sintéticos. A diferencia del `DriftInjector` que modifica distribuciones, `ScenarioInjector` crea patrones deterministas o estocásticos de evolución (cómo cambian las features en el tiempo) y construye variables objetivo basadas en lógica.
 
@@ -32,7 +32,7 @@ scenario_conf = ScenarioConfig(
 # gen.generate(..., dynamics_config=scenario_conf)
 
 # Vía Inyección Directa:
-from calm_data_generator.injectors import ScenarioInjector
+from calm_data_generator.generators.dynamics import ScenarioInjector
 injector = ScenarioInjector()
 df_evolved = injector.apply_config(df, scenario_conf)
 ```
@@ -72,7 +72,7 @@ df_evolved = injector.apply_config(df, scenario_conf)
 
 ## 🛠️ Referencia de Clase `ScenarioInjector`
 
-**Importar:** `from calm_data_generator.injectors import ScenarioInjector`
+**Importar:** `from calm_data_generator.generators.dynamics import ScenarioInjector`
 
 ### Método: `evolve_features()`
 

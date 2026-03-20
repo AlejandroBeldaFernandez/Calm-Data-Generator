@@ -1,6 +1,6 @@
 # DriftInjector - Complete Reference
 
-**Location:** `calm_data_generator.injectors.DriftInjector`
+**Location:** `calm_data_generator.generators.drift.DriftInjector`
 
 The `DriftInjector` is a powerful tool to simulate **data drift** (changes in data distribution over time) in synthetic datasets. It is essential for testing model monitoring systems, drift detection algorithms, and adaptive ML pipelines.
 
@@ -87,7 +87,7 @@ Do you want to change...
 
 If you need more control than `generate()` allows, you can use `DriftInjector` directly on any DataFrame.
 
-**Import:** `from calm_data_generator.injectors import DriftInjector`
+**Import:** `from calm_data_generator.generators.drift import DriftInjector`
 
 ### Initialization
 
