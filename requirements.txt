@@ -25,6 +25,7 @@ plotly>=6.5.0,<6.6.0
 cell-gears>=0.1.2,<0.2.0
 torch-geometric>=2.7.0,<2.8.0
 huggingface-hub>=0.36.0,<1.0.0
+transformers>=4.22.1,<5.0.0
 xgboost>=2.1.0,<2.2.0
 hmmlearn>=0.3.0,<0.4.0
 
