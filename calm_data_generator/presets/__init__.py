@@ -1,40 +1,48 @@
 from .base import GeneratorPreset
+from .FastPreset import FastPreset
+from .FastPrototypePreset import FastPrototypePreset
 from .HighFidelityPreset import HighFidelityPreset
+from .DiffusionPreset import DiffusionPreset
+from .CopulaPreset import CopulaPreset
+from .DataQualityAuditPreset import DataQualityAuditPreset
 from .ImbalancePreset import ImbalancedGeneratorPreset
 from .BalancePreset import BalancedDataGeneratorPreset
-from .SingleCellQualityPreset import SingleCellQualityPreset
-from .FastPrototypePreset import FastPrototypePreset
 from .TimeSeriesPreset import TimeSeriesPreset
-from .DriftScenarioPreset import DriftScenarioPreset
-from .RareDiseasePreset import RareDiseasePreset
-from .DiffusionPreset import DiffusionPreset
 from .SeasonalTimeSeriesPreset import SeasonalTimeSeriesPreset
-from .ConceptDriftPreset import ConceptDriftPreset
+from .DriftScenarioPreset import DriftScenarioPreset
 from .GradualDriftPreset import GradualDriftPreset
-from .DataQualityAuditPreset import DataQualityAuditPreset
-from .CopulaPreset import CopulaPreset
-from .LongitudinalHealthPreset import LongitudinalHealthPreset
-from .OmicsIntegrationPreset import OmicsIntegrationPreset
+from .ConceptDriftPreset import ConceptDriftPreset
 from .ScenarioInjectorPreset import ScenarioInjectorPreset
+from .LongitudinalHealthPreset import LongitudinalHealthPreset
+from .RareDiseasePreset import RareDiseasePreset
+from .OmicsIntegrationPreset import OmicsIntegrationPreset
+from .SingleCellQualityPreset import SingleCellQualityPreset
 
 
 __all__ = [
     "GeneratorPreset",
+    # Speed
+    "FastPreset",
+    "FastPrototypePreset",
+    # Quality
     "HighFidelityPreset",
+    "DiffusionPreset",
+    "CopulaPreset",
+    "DataQualityAuditPreset",
+    # Class distribution
     "ImbalancedGeneratorPreset",
     "BalancedDataGeneratorPreset",
-    "SingleCellQualityPreset",
-    "FastPrototypePreset",
+    # Time series
     "TimeSeriesPreset",
-    "DriftScenarioPreset",
-    "RareDiseasePreset",
-    "DiffusionPreset",
     "SeasonalTimeSeriesPreset",
-    "ConceptDriftPreset",
+    # Drift & scenarios
+    "DriftScenarioPreset",
     "GradualDriftPreset",
-    "DataQualityAuditPreset",
-    "CopulaPreset",
-    "LongitudinalHealthPreset",
-    "OmicsIntegrationPreset",
+    "ConceptDriftPreset",
     "ScenarioInjectorPreset",
+    # Clinical / omics
+    "LongitudinalHealthPreset",
+    "RareDiseasePreset",
+    "OmicsIntegrationPreset",
+    "SingleCellQualityPreset",
 ]

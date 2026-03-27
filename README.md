@@ -6,9 +6,9 @@
 [![PyPI version](https://img.shields.io/pypi/v/calm-data-generator.svg)](https://pypi.org/project/calm-data-generator/)
 [![Downloads](https://img.shields.io/pypi/dm/calm-data-generator)](https://pypi.org/project/calm-data-generator/)
 
-> 🚀 **Now available on PyPI!** Install with: `pip install calm-data-generator`
+> **Now available on PyPI!** Install with: `pip install calm-data-generator`
 
-> 🇪🇸 **[Versión en Español](README_ES.md)**
+> **[Versión en Español](README_ES.md)**
 
 **CALM-Data-Generator** is a comprehensive Python library for synthetic data generation with advanced features for:
 - **Clinical/Medical Data** - Generate realistic patient demographics, genes, proteins
@@ -24,12 +24,12 @@
 ## Scope & Capabilities
 
 **Calm-Data-Generator** is optimized for **structured tabular data**. It is designed to handle:
-- ✅ **Classification** (Binary & Multi-class)
-- ✅ **Regression** (Continuous variables)
-- ✅ **Multi-label** problems
-- ✅ **Clustering** (Preserving natural groupings)
-- ✅ **Time Series** (Temporal correlations and patterns)
-- ✅ **Single-Cell / Genomics** (scRNA-seq expression data)
+- **Classification** (Binary & Multi-class)
+- **Regression** (Continuous variables)
+- **Multi-label** problems
+- **Clustering** (Preserving natural groupings)
+- **Time Series** (Temporal correlations and patterns)
+- **Single-Cell / Genomics** (scRNA-seq expression data)
 
 > [!IMPORTANT]
 > This library is **NOT** designed for unstructured data such as **Images**, **Videos**, or **Audio**. It does not include Computer Vision or Signal Processing models.
@@ -40,21 +40,31 @@
 
 **CALM-Data-Generator** is not just another synthetic data tool—it's a **unified ecosystem** that brings together the best open-source libraries under a single, consistent API:
 
-### 🔗 Unified Multi-Library Integration
+### Unified Multi-Library Integration
 Instead of learning and managing multiple complex libraries separately, CALM-Data-Generator provides:
 - **One API** for 15+ synthesis methods from different sources (Synthcity, scvi-tools, GEARS, imbalanced-learn, etc.)
 - **Seamless interoperability** between tabular, time-series, streaming, and genomic data generators
 - **Consistent configuration** across all methods with automatic parameter validation
 - **Integrated reporting** with YData Profiling for all generation methods
+- **Extensible generator hierarchy**: `BaseGenerator` -> `ComplexGenerator` -> domain generators. New domains (Finance, IoT, Insurance) inherit three reusable mathematical engines (Gaussian Copula unconditional, Gaussian Copula conditional, stochastic effects) without duplicating code.
 
-### 🌊 Advanced Drift Injection (Industry-Leading)
+### Advanced Drift Injection (Industry-Leading)
 The **DriftInjector** module is one of the most comprehensive drift simulation tools available:
 - **14+ drift types**: Feature drift (gradual, abrupt, incremental, recurrent), label drift, concept drift, correlation drift, outlier injection, and more
 - **Correlation-aware drift**: Propagate realistic drift across correlated features (e.g., increase income → increase spending)
 - **Multi-modal drift profiles**: Sigmoid, linear, cosine transitions for gradual drift
 - **Conditional drift**: Apply drift only to specific data subsets based on business rules
+- **Functional drift** *(Pilar 5)*: Drift magnitude varies per row as a function of another column (e.g., sensor noise that scales exponentially with temperature)
+- **Causal cascades** *(Pilar 5)*: Define a causal DAG and propagate perturbations through non-linear transfer functions (`CausalEngine`)
 - **Integrated with generators**: Inject drift directly during synthesis or post-hoc on existing data
 - **Perfect for MLOps**: Test data drift monitoring, concept drift detection, and model robustness before production
+
+### Scenario Evolution
+The **ScenarioInjector** creates deterministic or stochastic temporal patterns:
+- **7 evolution types**: `linear`, `exponential_growth`, `decay`, `seasonal`, `step`, `noise`, `random_walk`
+- **driven_by** *(Pilar 5)*: Feature delta per row = f(current value of another column) — couples variables without a full DAG
+- **Target construction**: Build synthetic ground-truth target variables from feature formulas or callables
+- **Future projection**: Extend historical datasets into future time periods
 
 > **In summary**: While other tools focus on a single approach (e.g., just GANs, just statistical methods), CALM-Data-Generator **unifies the ecosystem** and adds **production-grade drift simulation** that most libraries don't offer.
 
@@ -64,40 +74,157 @@ The **DriftInjector** module is one of the most comprehensive drift simulation t
 
 This library leverages and unifies best-in-class open-source tools to provide a seamless data generation experience:
 
-- **Synthcity**: The core engine for tabular deep learning models (CTGAN, TVAE) and privacy. **Included by default**.
-- **River**: Powers the streaming generation capabilities (`[stream]` extra)..
-- **YData Profiling**: Generates comprehensive automated quality reports.
+### Synthesis Engines
 
-## ⚡ Presets (Templates)
+| Library | Methods / Features | Docs |
+|---------|-------------------|------|
+| [Synthcity](https://github.com/vanderschaarlab/synthcity) | CTGAN, TVAE, DDPM, TimeGAN, TimeVAE, FFlows, GREAT, RTVAE, BN, DPGAN, PATEGAN, Conditional Drift | [synthcity docs](https://github.com/vanderschaarlab/synthcity) |
+| [scikit-learn](https://scikit-learn.org/) | CART, RF, KDE, GMM, metrics, preprocessing | [sklearn docs](https://scikit-learn.org/stable/user_guide.html) |
+| [LightGBM](https://lightgbm.readthedocs.io/) | LGBM synthesis (FCS-style) | [lgbm docs](https://lightgbm.readthedocs.io/en/stable/) |
+| [XGBoost](https://xgboost.readthedocs.io/) | XGBoost synthesis (FCS-style) | [xgb docs](https://xgboost.readthedocs.io/en/stable/) |
+| [Copulae](https://github.com/DanielBok/copulae) | Copula, Windowed Copula | [copulae docs](https://copulae.readthedocs.io/) |
+| [imbalanced-learn](https://imbalanced-learn.org/) | SMOTE, ADASYN | [imblearn docs](https://imbalanced-learn.org/stable/) |
+| [hmmlearn](https://hmmlearn.readthedocs.io/) | HMM synthesis | [hmmlearn docs](https://hmmlearn.readthedocs.io/) |
+| [PyTorch](https://pytorch.org/) | Diffusion (custom), backend for all deep learning methods | [torch docs](https://pytorch.org/docs/) |
 
-**Calm-Data-Generator** includes a set of **Presets** designed to give you a head start. These are pre-configured settings for common use cases.
+### Single-Cell / Omics
+
+| Library | Methods / Features | Docs |
+|---------|-------------------|------|
+| [scvi-tools](https://docs.scvi-tools.org/) | scVI, scANVI | [scvi docs](https://docs.scvi-tools.org/) |
+| [GEARS](https://github.com/snap-stanford/GEARS) | Perturbation prediction (GEARS method) | [gears docs](https://github.com/snap-stanford/GEARS) |
+| [AnnData](https://anndata.readthedocs.io/) | Single-cell data structures for scVI/scANVI/GEARS | [anndata docs](https://anndata.readthedocs.io/) |
+
+### Quality & Reporting
+
+| Library | Methods / Features | Docs |
+|---------|-------------------|------|
+| [SDMetrics](https://docs.sdv.dev/sdmetrics/) | QualityReporter — statistical quality scores | [sdmetrics docs](https://docs.sdv.dev/sdmetrics/) |
+| [YData Profiling](https://ydata-profiling.ydata.ai/) | Automated data profiling reports | [ydata docs](https://ydata-profiling.ydata.ai/docs/) |
+| [Plotly](https://plotly.com/python/) | Interactive visualizations and dashboards | [plotly docs](https://plotly.com/python/) |
+
+### Mathematical Foundations
+
+| Library | Methods / Features | Docs |
+|---------|-------------------|------|
+| [SciPy](https://docs.scipy.org/) | Gaussian Copula (ComplexGenerator), PSD matrix repair, statistics | [scipy docs](https://docs.scipy.org/) |
+| [NumPy](https://numpy.org/) | Numerical arrays, all generators | [numpy docs](https://numpy.org/doc/) |
+| [Pandas](https://pandas.pydata.org/) | DataFrames, all generators | [pandas docs](https://pandas.pydata.org/docs/) |
+
+### Streaming
+
+| Library | Methods / Features | Docs |
+|---------|-------------------|------|
+| [River](https://riverml.xyz/) | StreamGenerator — Agrawal, SEA, Hyperplane, Sine, etc. (`[stream]` extra) | [river docs](https://riverml.xyz/latest/) |
+
+## Presets (Templates)
+
+**Calm-Data-Generator** includes **19 ready-to-use Presets** covering the most common synthetic data scenarios. Each preset encapsulates a generator configuration (method, hyperparameters, reporting) and exposes a single `.generate()` call.
 
 > [!TIP]
-> **Presets are Baselines**: They are intended to be used as a **starting point**. You should import a preset, modify it to fit your specific data needs (e.g., change columns, tweak thresholds), and then pass it to the generator.
+> **Presets are starting points**: instantiate a preset, call `.generate()`, and override any parameter you need via `__init__` arguments (`random_state`, `verbose`, `fast_dev_run`).
 
 ### Available Presets
-Located in `calm_data_generator/presets/`, easy to import and iterate upon:
 
-- **`FastPrototypePreset`**: Optimized for speed (fewer epochs, simple models) to test pipelines quickly.
-- **`HighFidelityPreset`**: Tuned for maximum quality (CTGAN/TVAE with more training) for production data.
-- **`ClinicalDataGenerator`** (and presets): Specialized for healthcare data (demographics + omics).
-- **`ImbalancePreset`**: Configured to handle and rebalance highly skewed datasets.
-- **`TimeSeriesPreset`**: setup for sequential data generation.
+**Speed & Prototyping**
 
-**Example Usage:**
+| Preset | Method | Use Case |
+|--------|--------|----------|
+| `FastPreset` | LightGBM | Fastest generation, configurable via kwargs |
+| `FastPrototypePreset` | LightGBM | CI/CD pipelines, integration tests (fixed 10 iterations) |
+
+**Quality & Fidelity**
+
+| Preset | Method | Use Case |
+|--------|--------|----------|
+| `HighFidelityPreset` | CTGAN (1000 epochs) | Production-quality tabular data |
+| `DiffusionPreset` | TabDDPM (1000 steps) | Complex multi-modal distributions |
+| `CopulaPreset` | Gaussian Copula | Fast statistical baseline, dependency modeling |
+| `DataQualityAuditPreset` | TVAE + full report | Quality audit with comprehensive automated reporting |
+
+**Class Distribution**
+
+| Preset | Method | Use Case |
+|--------|--------|----------|
+| `ImbalancedGeneratorPreset` | CTGAN | Force a specific minority/majority ratio (binary) |
+| `BalancedDataGeneratorPreset` | SMOTE | Oversample minority classes to balance a skewed dataset |
+
+**Time Series**
+
+| Preset | Method | Use Case |
+|--------|--------|----------|
+| `TimeSeriesPreset` | TimeGAN / TimeVAE / FourierFlows | Sequential data with temporal dynamics |
+| `SeasonalTimeSeriesPreset` | TimeGAN + ScenarioInjector | Time series with injected sinusoidal seasonality |
+
+**Drift & Scenarios**
+
+| Preset | Method | Use Case |
+|--------|--------|----------|
+| `DriftScenarioPreset` | CTGAN + DriftConfig | Stress-test drift detection systems |
+| `GradualDriftPreset` | CTGAN + linear drift | Simulate slow linear feature drift |
+| `ConceptDriftPreset` | CTGAN + concept drift | Alter P(y\|x) relationships |
+| `ScenarioInjectorPreset` | ScenarioInjector | Apply custom evolution scenarios to existing data |
+
+**Clinical & Omics**
+
+| Preset | Method | Use Case |
+|--------|--------|----------|
+| `LongitudinalHealthPreset` | ClinicalDataGenerator | Multi-visit patient records |
+| `RareDiseasePreset` | ClinicalDataGenerator | Cohorts with rare condition (default 1% prevalence) |
+| `OmicsIntegrationPreset` | ClinicalDataGenerator | Multi-omics (clinical + gene expression + proteomics) |
+| `SingleCellQualityPreset` | scVI (400 epochs) | High-quality single-cell RNA-seq data |
+
+> Full parameter reference: [`calm_data_generator/docs/PRESETS_REFERENCE.md`](calm_data_generator/docs/PRESETS_REFERENCE.md)
+
+### Quick-Start Examples
+
 ```python
-from calm_data_generator.presets import FastPrototypePreset
-from calm_data_generator import RealGenerator
+from calm_data_generator.presets import FastPreset, HighFidelityPreset, ImbalancedGeneratorPreset
 
-# 1. Load the preset config
-config = FastPrototypePreset
+# --- Fast generation ---
+preset = FastPreset(random_state=42)
+synthetic_df = preset.generate(data=real_df, n_samples=1000)
 
-# 2. Modify it for your specific case
-config["epochs"] = 50  # Overwrite default
+# --- High-fidelity production data ---
+preset = HighFidelityPreset(random_state=42)
+synthetic_df = preset.generate(data=real_df, n_samples=5000)
 
-# 3. Use it
-gen = RealGenerator()
-gen.generate(data, **config)
+# --- Imbalanced dataset (5% minority) ---
+preset = ImbalancedGeneratorPreset(random_state=42)
+synthetic_df = preset.generate(
+    data=real_df, n_samples=2000,
+    target_col="label", imbalance_ratio=0.05
+)
+```
+
+```python
+from calm_data_generator.presets import TimeSeriesPreset, SeasonalTimeSeriesPreset
+
+# --- Time series with TimeGAN ---
+preset = TimeSeriesPreset(random_state=42)
+synthetic_df = preset.generate(
+    data=ts_df, n_samples=500, sequence_key="patient_id", time_key="visit_date"
+)
+
+# --- Seasonal time series (monthly pattern) ---
+preset = SeasonalTimeSeriesPreset(random_state=42)
+synthetic_df = preset.generate(
+    data=ts_df, n_samples=500,
+    time_col="date", seasonal_cols=["sales", "demand"],
+    period=12, amplitude=2.0
+)
+```
+
+```python
+from calm_data_generator.presets import LongitudinalHealthPreset, SingleCellQualityPreset
+
+# --- Clinical longitudinal data (multi-visit) ---
+preset = LongitudinalHealthPreset(random_state=42)
+result = preset.generate(n_samples=200, n_visits=6)
+
+# --- Single-cell RNA-seq ---
+preset = SingleCellQualityPreset(random_state=42)
+synthetic_df = preset.generate(data=adata_df, n_samples=500)
 ```
 
 ## Key Libraries & Ecosystem
@@ -111,7 +238,9 @@ gen.generate(data, **config)
  | **YData Profiling**| Reporting | Generates automated quality reports (`QualityReporter`). |
  | **Pydantic** | Validation | Ensures strict type checking and configuration management. |
  | **PyTorch** | Backend | Underlying tensor computation for all deep learning models. |
- | **Copulae** | Statistical Modeling | Powers the `copula` method for multivariate dependence modeling. |
+ | **Copulae** | Statistical Modeling | Powers the `copula` and `windowed_copula` methods for multivariate dependence modeling and drift-aware generation. |
+ | **hmmlearn** | Statistical Modeling | Powers the `hmm` method for drift-aware generation via Hidden Markov Model regime transitions. |
+ | **SciPy** | Mathematical Core | Powers the Gaussian Copula engines inside `ComplexGenerator` (unconditional and conditional) for correlated multi-variate generation across domains. |
 
 ## Safe Data Sharing
 
@@ -147,7 +276,7 @@ Minimalist view of the system's core components and data flow.
  > [!WARNING]
  > The installation might be **heavy (~2-3 GB)** and take a few minutes depending on your internet connection. We strongly recommend using a fresh virtual environment.
  
- ### 🔄 Versioning Strategy
+ ### Versioning Strategy
  
  - **GitHub (Recommended for latest features)**: The `main` branch contains the most up-to-date version with the latest bug fixes and features.
  - **PyPI (Stable)**: Releases on PyPI are stable versions updated less frequently for major changes.
@@ -180,7 +309,7 @@ pip install "calm-data-generator[full]"
 ```
 
 > [!NOTE]
-> **Performance & Stability Note**: We have optimized the dependency tree since version 1.0.0 by pinning specific versions such as `pydantic`, `xgboost`, and `cloudpickle`. This improves compatibility and reduces installation issues. 🚀
+> **Performance & Stability Note**: We have optimized the dependency tree since version 1.0.0 by pinning specific versions such as `pydantic`, `xgboost`, and `cloudpickle`. This improves compatibility and reduces installation issues.
 
 **From source (GitHub - Latest Updates):**
 Use this method to get the latest bug fixes and features not yet released on PyPI.
@@ -272,15 +401,14 @@ print(f"Generated {len(synthetic)} samples")
 
 | Method | GPU Support | Parameter |
 |--------|-------------|-----------|
-| `ctgan`, `tvae` | ✅ CUDA/MPS | `enable_gpu=True` |
-| `diffusion` | ✅ PyTorch | Auto-detected |
-| `ddpm` | ✅ PyTorch + Synthcity | Auto-detected |
-| `timegan` | ✅ PyTorch + Synthcity | Auto-detected |
-| `timevae` | ✅ PyTorch + Synthcity | Auto-detected |
-| `fflows` | ✅ PyTorch + Synthcity | Auto-detected |
+| `ctgan`, `tvae` | Yes — CUDA/MPS | `enable_gpu=True` |
+| `diffusion` | Yes — PyTorch | Auto-detected |
+| `ddpm` | Yes — PyTorch + Synthcity | Auto-detected |
+| `timegan` | Yes — PyTorch + Synthcity | Auto-detected |
+| `timevae` | Yes — PyTorch + Synthcity | Auto-detected |
+| `fflows` | Yes — PyTorch + Synthcity | Auto-detected |
 
-
-| `smote`, `adasyn`, `cart`, `rf`, `lgbm`, `gmm`, `copula` | ❌ CPU only | - |
+| `smote`, `adasyn`, `cart`, `rf`, `lgbm`, `gmm`, `copula` | No — CPU only | - |
 
 ```python
 synthetic = gen.generate(
@@ -474,6 +602,9 @@ reporter.generate_report(
 | `copula` | Copula | Copula-based synthesis | Base installation |
 | `gmm` | Statistical | Gaussian Mixture Models | Base installation |
 | `scvi` | Single-Cell | scVI (Variational Inference) for RNA-seq | Requires `scvi-tools` |
+| `conditional_drift` | Drift-Aware | Temporal conditioning via TVAE/CTGAN | Requires `synthcity` |
+| `windowed_copula` | Drift-Aware | Gaussian Copula interpolated across time windows | Base installation |
+| `hmm` | Drift-Aware | Hidden Markov Model — drift via regime transitions | Requires `hmmlearn` |
 
 
 ---
@@ -529,6 +660,25 @@ MIT License - see [LICENSE](LICENSE) file
 
 ---
 
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for the full history. Summary of recent releases:
+
+### v2.0.0 — 2026-03-27
+- **ComplexGenerator**: new abstract layer with 3 reusable mathematical engines (Gaussian Copula unconditional/conditional + stochastic effects). `ClinicalDataGenerator` now inherits from it.
+- **CausalEngine**: DAG-based causal cascade with topological sort (Kahn's algorithm) and non-linear transfer functions.
+- **`inject_functional_drift()`**: per-row drift magnitude = f(driver column value).
+- **`inject_causal_cascade()`**: full causal propagation integrated into `DriftInjector`.
+- **`driven_by` evolve type**: `ScenarioInjector` feature delta driven by another column per row.
+- **Bug fixes**: CART datetime handling, `bn` method dispatch, `conditional_drift` Synthcity API, `windowed_copula` 1D array reshape.
+- **Tests**: 186 passed, 0 failed — all `unittest.TestCase` files converted to pytest.
+
+### v1.2.0
+- `differentiation_factor`, `clipping_mode`, `use_latent_sampling` parameters.
+- Windowed Copula, Conditional Drift, DPGAN, PATEGAN synthesis methods.
+
+---
+
 ## Acknowledgements & Credits
 
 We stand on the shoulders of giants. This library is possible thanks to these amazing open-source projects:
@@ -546,6 +696,6 @@ We stand on the shoulders of giants. This library is possible thanks to these am
 - **[PyTorch](https://github.com/pytorch/pytorch)** (BSD-3-Clause) - The deep learning framework powering our generative models.
 - **[PyTorch Geometric](https://github.com/pyg-team/pytorch_geometric)** (MIT) - Enabling Graph Neural Network operations for relational data.
 - **[XGBoost](https://github.com/dmlc/xgboost)** (Apache-2.0) - optimized distributed gradient boosting library.
-- **[Opacus](https://github.com/pytorch/opacus)** (Apache-2.0) - Enabling differential privacy training for PyTorch models.
 - **[Hugging Face Hub](https://github.com/huggingface/huggingface_hub)** (Apache-2.0) - Facilitating model sharing and versioning.
 - **[Plotly](https://github.com/plotly/plotly.py)** (MIT) - Enabling interactive data visualizations.
+- **[hmmlearn](https://github.com/hmmlearn/hmmlearn)** (BSD-3-Clause) - Powering the `hmm` method for drift-aware generation via Hidden Markov Models.

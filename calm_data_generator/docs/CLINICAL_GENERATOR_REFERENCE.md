@@ -1,8 +1,9 @@
 # ClinicalDataGenerator - Complete Reference
 
 **Location:** `calm_data_generator.generators.clinical.ClinicalDataGenerator`
+**Inherits from:** `ComplexGenerator` → `BaseGenerator`
 
-The `ClinicalDataGenerator` is a high-fidelity simulator for multi-modal healthcare datasets.
+The `ClinicalDataGenerator` is a high-fidelity simulator for multi-modal healthcare datasets. It uses the three mathematical engines provided by `ComplexGenerator` (Gaussian Copula unconditional, Gaussian Copula conditional, and stochastic effects) to generate correlated, biologically realistic data. See [COMPLEX_GENERATOR_REFERENCE.md](COMPLEX_GENERATOR_REFERENCE.md) for engine details.
 
 ---
 
@@ -139,15 +140,19 @@ The `disease_effects_config` allows precise control over biological signals. You
 
 ### Supported Effect Types
 
+All effects are applied via `ComplexGenerator.apply_stochastic_effects`. Each entity (patient) receives an independent random offset sampled from the `effect_value` distribution.
+
 | Effect Type | Formula | Description |
 |-------------|---------|-------------|
 | `fold_change` | $x_{new} = x \cdot value$ | Multiplicative scaling (e.g., overexpression) |
-| `additive_shift` | $x_{new} = x + value$ | Adds constant background signal |
+| `additive_shift` | $x_{new} = x + value$ | Direct additive offset |
 | `power_transform` | $x_{new} = x^{value}$ | Non-linear distortion |
 | `log_transform` | $x_{new} = \ln(x + \epsilon)$ | Logarithmic normalization |
 | `variance_scale` | $x_{new} = \mu + (x-\mu)\cdot value$ | Increases/decreases spread |
 | `polynomial_transform`| $x_{new} = P(x)$ | Polynomial mapping (coeffs in value) |
 | `sigmoid_transform` | $x_{new} = \frac{1}{1 + e^{-k(x-x_0)}}$ | S-curve saturation |
+
+> **Note for protein data:** Prefer `fold_change` for lognormal protein distributions. Using `additive_shift` on proteins emits a logger warning because it now applies a direct additive shift (not the legacy log-space shift from previous versions). Use `simple_additive_shift` as an explicit alias if you want a direct additive shift without the warning.
 
 ---
 

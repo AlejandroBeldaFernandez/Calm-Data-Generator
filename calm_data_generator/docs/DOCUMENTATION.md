@@ -3,16 +3,17 @@
 ## Table of Contents
 
 1. [Installation](#installation)
-2. [Module Overview](#module-overview)
-3. [RealGenerator](#realgenerator)
-4. [ClinicalDataGenerator](#clinicaldatagenerator)
-5. [StreamGenerator](#streamgenerator)
-6. [DriftInjector](#driftinjector)
-7. [ScenarioInjector](#scenarioinjector)
-8. [Block Generators](#block-generators)
-9. [Privacy Module](#privacy-module)
-10. [Configuration Options](#configuration-options)
-11. [Best Practices](#best-practices)
+2. [Library Reference](#library-reference)
+3. [Module Overview](#module-overview)
+4. [RealGenerator](#realgenerator)
+5. [ClinicalDataGenerator](#clinicaldatagenerator)
+6. [StreamGenerator](#streamgenerator)
+7. [DriftInjector](#driftinjector)
+8. [ScenarioInjector](#scenarioinjector)
+9. [Block Generators](#block-generators)
+10. [Privacy Module](#privacy-module)
+11. [Configuration Options](#configuration-options)
+12. [Best Practices](#best-practices)
 
 > **Detailed Module References:**
 > - [RealGenerator](./REAL_GENERATOR_REFERENCE.md)
@@ -61,6 +62,68 @@ If `river` fails to build on Linux, ensure you have the necessary tools:
 sudo apt-get update
 sudo apt-get install -y build-essential python3-dev
 ```
+
+---
+
+## Library Reference
+
+Each synthesis method in CALM-Data-Generator is powered by one or more underlying open-source libraries. The tables below show exactly which library backs each method, along with a link to its official documentation.
+
+### Synthesis Methods → Library
+
+| Method | Primary Library | Notes | Docs |
+|--------|----------------|-------|------|
+| `cart` | [scikit-learn](https://scikit-learn.org/) | Fully Conditional Specification with Decision Trees | [sklearn.tree](https://scikit-learn.org/stable/modules/tree.html) |
+| `rf` | [scikit-learn](https://scikit-learn.org/) | Fully Conditional Specification with Random Forests | [sklearn.ensemble](https://scikit-learn.org/stable/modules/ensemble.html) |
+| `lgbm` | [LightGBM](https://lightgbm.readthedocs.io/) | FCS with gradient boosting; handles categoricals natively | [lgbm docs](https://lightgbm.readthedocs.io/en/stable/) |
+| `xgboost` | [XGBoost](https://xgboost.readthedocs.io/) | FCS with extreme gradient boosting | [xgb docs](https://xgboost.readthedocs.io/en/stable/) |
+| `ctgan` | [Synthcity](https://github.com/vanderschaarlab/synthcity) | Conditional GAN for tabular data | [synthcity](https://github.com/vanderschaarlab/synthcity) |
+| `tvae` | [Synthcity](https://github.com/vanderschaarlab/synthcity) | Variational Autoencoder for tabular data | [synthcity](https://github.com/vanderschaarlab/synthcity) |
+| `ddpm` | [Synthcity](https://github.com/vanderschaarlab/synthcity) | Denoising Diffusion Probabilistic Model | [synthcity](https://github.com/vanderschaarlab/synthcity) |
+| `diffusion` | [PyTorch](https://pytorch.org/) | Lightweight custom diffusion model (no Synthcity) | [torch docs](https://pytorch.org/docs/) |
+| `timegan` | [Synthcity](https://github.com/vanderschaarlab/synthcity) | GAN for time-series data | [synthcity](https://github.com/vanderschaarlab/synthcity) |
+| `timevae` | [Synthcity](https://github.com/vanderschaarlab/synthcity) | VAE for time-series data | [synthcity](https://github.com/vanderschaarlab/synthcity) |
+| `fflows` | [Synthcity](https://github.com/vanderschaarlab/synthcity) | Normalizing flows for periodic time series | [synthcity](https://github.com/vanderschaarlab/synthcity) |
+| `great` | [Synthcity](https://github.com/vanderschaarlab/synthcity) | Graph-based tabular method | [synthcity](https://github.com/vanderschaarlab/synthcity) |
+| `rtvae` | [Synthcity](https://github.com/vanderschaarlab/synthcity) | Recurrent TVAE for sequential data | [synthcity](https://github.com/vanderschaarlab/synthcity) |
+| `bn` | [Synthcity](https://github.com/vanderschaarlab/synthcity) | Bayesian Network structure learning | [synthcity](https://github.com/vanderschaarlab/synthcity) |
+| `dpgan` | [Synthcity](https://github.com/vanderschaarlab/synthcity) | Differentially Private GAN | [synthcity](https://github.com/vanderschaarlab/synthcity) |
+| `pategan` | [Synthcity](https://github.com/vanderschaarlab/synthcity) | Private Aggregation of Teacher Ensembles GAN | [synthcity](https://github.com/vanderschaarlab/synthcity) |
+| `copula` | [Copulae](https://copulae.readthedocs.io/) | Gaussian Copula with Min-Max scaling | [copulae docs](https://copulae.readthedocs.io/) |
+| `windowed_copula` | [Copulae](https://copulae.readthedocs.io/) | Multiple copulas for non-stationary time windows | [copulae docs](https://copulae.readthedocs.io/) |
+| `gmm` | [scikit-learn](https://scikit-learn.org/) | Gaussian Mixture Models | [sklearn.mixture](https://scikit-learn.org/stable/modules/mixture.html) |
+| `kde` | [scikit-learn](https://scikit-learn.org/) | Kernel Density Estimation | [sklearn.neighbors](https://scikit-learn.org/stable/modules/density.html) |
+| `hmm` | [hmmlearn](https://hmmlearn.readthedocs.io/) | Hidden Markov Models | [hmmlearn docs](https://hmmlearn.readthedocs.io/) |
+| `smote` | [imbalanced-learn](https://imbalanced-learn.org/) | SMOTE oversampling | [imblearn docs](https://imbalanced-learn.org/stable/references/over_sampling.html) |
+| `adasyn` | [imbalanced-learn](https://imbalanced-learn.org/) | Adaptive synthetic sampling | [imblearn docs](https://imbalanced-learn.org/stable/references/over_sampling.html) |
+| `scvi` | [scvi-tools](https://docs.scvi-tools.org/) | Variational Autoencoder for scRNA-seq | [scvi docs](https://docs.scvi-tools.org/) |
+| `scanvi` | [scvi-tools](https://docs.scvi-tools.org/) | Semi-supervised scVI with cell type labels | [scvi docs](https://docs.scvi-tools.org/) |
+| `gears` | [GEARS](https://github.com/snap-stanford/GEARS) | Graph neural network perturbation prediction | [gears docs](https://github.com/snap-stanford/GEARS) |
+| `conditional_drift` | [Synthcity](https://github.com/vanderschaarlab/synthcity) | Stage-conditioned generation for distribution drift | [synthcity](https://github.com/vanderschaarlab/synthcity) |
+| `resample` | [scikit-learn](https://scikit-learn.org/) | Bootstrap resampling | [sklearn.utils](https://scikit-learn.org/stable/modules/generated/sklearn.utils.resample.html) |
+
+### Generators → Libraries
+
+| Generator | Libraries Used |
+|-----------|---------------|
+| **RealGenerator** | scikit-learn, Synthcity, LightGBM, XGBoost, Copulae, imbalanced-learn, hmmlearn, scvi-tools, GEARS, PyTorch |
+| **ClinicalDataGenerator** | NumPy, Pandas, SciPy (`stats`, `linalg`) — via ComplexGenerator |
+| **ComplexGenerator** | SciPy (`linalg.eigh`, `stats`), NumPy — Gaussian Copula engines |
+| **StreamGenerator** | NumPy, Pandas, DriftInjector |
+| **StreamGeneratorFactory** | [River](https://riverml.xyz/) — optional `[stream]` extra |
+| **DriftInjector** | NumPy, Pandas, QualityReporter |
+| **ScenarioInjector** | NumPy, Pandas |
+| **CausalEngine** | NumPy, Pandas |
+| **QualityReporter** | scikit-learn, [SDMetrics](https://docs.sdv.dev/sdmetrics/), [Plotly](https://plotly.com/python/), [YData Profiling](https://ydata-profiling.ydata.ai/) |
+
+### Core Mathematical Dependencies
+
+| Library | Version | Role | Docs |
+|---------|---------|------|------|
+| [NumPy](https://numpy.org/) | `>=1.26, <2.0` | Numerical arrays, linear algebra | [numpy docs](https://numpy.org/doc/) |
+| [Pandas](https://pandas.pydata.org/) | `>=2.3` | DataFrames, data manipulation | [pandas docs](https://pandas.pydata.org/docs/) |
+| [SciPy](https://docs.scipy.org/) | `>=1.10, <1.15` | Distributions, PSD matrix repair, statistics | [scipy docs](https://docs.scipy.org/) |
+| [PyTorch](https://pytorch.org/) | `>=2.2, <2.4` | Deep learning infrastructure | [torch docs](https://pytorch.org/docs/) |
 
 ---
 
@@ -334,7 +397,7 @@ synthetic = gen.generate(
 synthetic = gen.generate(
     generator_instance=stream,
     n_samples=1000,
-    balance_target=True,
+    balance=True,
     use_smote=True  # Optional SMOTE
 )
 ```
@@ -805,4 +868,64 @@ synth = gen.generate(
     scheduler='cosine'
 )
 ```
+
+---
+
+## Presets
+
+Presets are ready-to-use generator configurations that encapsulate method selection, hyperparameters, and reporting for the most common synthetic data scenarios. Each preset exposes a single `.generate()` call.
+
+All presets share these constructor parameters:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `random_state` | `42` | Random seed |
+| `verbose` | `True` | Print progress messages |
+| `fast_dev_run` | `False` | Minimal iterations — for pipeline testing |
+
+### Preset Categories
+
+| Category | Preset | Method | Key Config |
+|----------|--------|--------|------------|
+| **Speed** | `FastPreset` | LightGBM | 10 iterations, forwards kwargs |
+| **Speed** | `FastPrototypePreset` | LightGBM | 10 iterations fixed, no kwargs |
+| **Quality** | `HighFidelityPreset` | CTGAN | 1000 epochs, batch 250, adversarial validation |
+| **Quality** | `DiffusionPreset` | TabDDPM | 1000 diffusion steps |
+| **Quality** | `CopulaPreset` | Gaussian Copula | Fast statistical baseline |
+| **Quality** | `DataQualityAuditPreset` | TVAE | 300 epochs, full report forced |
+| **Distribution** | `ImbalancedGeneratorPreset` | CTGAN | Custom minority/majority ratio |
+| **Distribution** | `BalancedDataGeneratorPreset` | SMOTE | Oversample to balance |
+| **Time Series** | `TimeSeriesPreset` | TimeGAN/TimeVAE/FourierFlows | 500 epochs, temporal models |
+| **Time Series** | `SeasonalTimeSeriesPreset` | TimeGAN + ScenarioInjector | Sinusoidal seasonality |
+| **Drift** | `DriftScenarioPreset` | CTGAN + DriftConfig | Drift stress-testing |
+| **Drift** | `GradualDriftPreset` | CTGAN + linear drift | Slow linear drift |
+| **Drift** | `ConceptDriftPreset` | CTGAN + concept drift | P(y\|x) changes |
+| **Drift** | `ScenarioInjectorPreset` | ScenarioInjector | Transform existing data |
+| **Clinical** | `LongitudinalHealthPreset` | ClinicalDataGenerator | Multi-visit patients |
+| **Clinical** | `RareDiseasePreset` | ClinicalDataGenerator | 1% disease prevalence |
+| **Clinical** | `OmicsIntegrationPreset` | ClinicalDataGenerator | Clinical + genes + proteins |
+| **Clinical** | `SingleCellQualityPreset` | scVI | 400 epochs, n_latent=10 |
+
+### Usage
+
+```python
+from calm_data_generator.presets import FastPreset, HighFidelityPreset, ImbalancedGeneratorPreset
+
+# Fast generation
+preset = FastPreset(random_state=42)
+synthetic_df = preset.generate(data=real_df, n_samples=1000)
+
+# High-fidelity production data
+preset = HighFidelityPreset(random_state=42)
+synthetic_df = preset.generate(data=real_df, n_samples=5000)
+
+# Imbalanced dataset (5% minority)
+preset = ImbalancedGeneratorPreset(random_state=42)
+synthetic_df = preset.generate(
+    data=real_df, n_samples=2000,
+    target_col="label", imbalance_ratio=0.05
+)
+```
+
+Full parameter reference for each preset: [PRESETS_REFERENCE.md](PRESETS_REFERENCE.md)
 

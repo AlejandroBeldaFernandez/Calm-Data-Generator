@@ -148,4 +148,37 @@ print(f"With future periods: {len(future_data)}")
 print(f"Last original date: {data['timestamp'].max()}")
 print(f"Last projected date: {future_data['timestamp'].max()}")
 
+# ============================================================
+# 7. driven_by Evolution — delta driven by another column
+# ============================================================
+
+print("\n--- driven_by: pressure delta = f(temperature) per row ---")
+
+driven_data = injector.evolve_features(
+    df=data.copy(),
+    evolution_config={
+        "pressure": {
+            "type":        "driven_by",
+            "driver_col":  "temperature",    # each row's delta depends on its temperature
+            "func":        "linear",
+            "func_params": {"slope": 0.4},   # delta_pressure = 0.4 * temperature
+        },
+        "humidity": {
+            "type":        "driven_by",
+            "driver_col":  "temperature",
+            "func":        "exponential",
+            "func_params": {"scale": 0.002, "rate": 0.03},
+        },
+    },
+)
+
+delta_pressure = driven_data["pressure"] - data["pressure"]
+print("Sample driven_by deltas (pressure ~ 0.4 × temperature):")
+print(
+    data[["temperature"]].assign(
+        delta_pressure=delta_pressure,
+        expected=data["temperature"] * 0.4,
+    ).head(5).to_string(index=False)
+)
+
 print("\n✅ ScenarioInjector tutorial completed!")

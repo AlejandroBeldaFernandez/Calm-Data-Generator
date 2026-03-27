@@ -147,4 +147,55 @@ print(data["target"].value_counts(normalize=True))
 print("Drifted Distribution:")
 print(drifted_label["target"].value_counts(normalize=True))
 
+# ============================================================
+# 6. Functional Drift — magnitude driven by another column
+# ============================================================
+
+print("\n--- Functional Drift: noise scales with feature_A value ---")
+
+# Sensor noise that grows exponentially with the signal level
+drifted_functional = injector.inject_functional_drift(
+    df=data.copy(),
+    target_cols=["feature_B"],
+    driver_col="feature_A",
+    magnitude_func="exponential",
+    magnitude_params={"scale": 0.01, "rate": 0.05},
+    drift_type="additive",
+)
+
+print(
+    f"Mean |delta| feature_B (low feature_A rows):  "
+    f"{(drifted_functional['feature_B'] - data['feature_B']).abs()[data['feature_A'] < data['feature_A'].median()].mean():.4f}"
+)
+print(
+    f"Mean |delta| feature_B (high feature_A rows): "
+    f"{(drifted_functional['feature_B'] - data['feature_B']).abs()[data['feature_A'] >= data['feature_A'].median()].mean():.4f}"
+)
+
+# ============================================================
+# 7. Causal Cascade — DAG-based propagation
+# ============================================================
+
+print("\n--- Causal Cascade: temperature → feature_A → feature_B ---")
+
+# Define a causal chain: temperature change ripples through the system
+dag = {
+    "feature_A": [],
+    "feature_B": [
+        {"parent": "feature_A", "func": "linear", "params": {"slope": 0.8}}
+    ],
+}
+
+drifted_cascade = injector.inject_causal_cascade(
+    df=data.copy(),
+    dag_config=dag,
+    trigger_col="feature_A",
+    trigger_delta=3.0,        # +3 units to feature_A
+    start_index=500,          # Only affect rows 500 onwards
+)
+
+print(f"Delta feature_A (row 600): {drifted_cascade['feature_A'].iloc[600] - data['feature_A'].iloc[600]:.2f}")
+print(f"Delta feature_B (row 600): {drifted_cascade['feature_B'].iloc[600] - data['feature_B'].iloc[600]:.2f}")
+print(f"(feature_B should be ~0.8 × delta_feature_A = {0.8 * 3.0:.2f})")
+
 print("\nAdvanced Drift tutorial completed!")

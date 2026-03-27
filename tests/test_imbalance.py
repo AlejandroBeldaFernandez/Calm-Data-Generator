@@ -1,22 +1,17 @@
-import unittest
 import pandas as pd
 import numpy as np
 import shutil
 import tempfile
 import os
+import pytest
 from calm_data_generator.generators.tabular.RealGenerator import RealGenerator
 
 
-class TestImbalance(unittest.TestCase):
-    def setUp(self):
-        self.output_dir = tempfile.mkdtemp()
-        np.random.seed(42)
-
-    def tearDown(self):
-        shutil.rmtree(self.output_dir)
-
-    def test_balance_imbalanced_data(self):
-        """Test A: Feed Imbalanced Data (90/10) -> Generate Balanced (50/50)."""
+def test_balance_imbalanced_data():
+    """Test A: Feed Imbalanced Data (90/10) -> Generate Balanced (50/50)."""
+    output_dir = tempfile.mkdtemp()
+    np.random.seed(42)
+    try:
         # Create imbalanced data (90% class 0, 10% class 1)
         n = 1000
         df = pd.DataFrame(
@@ -37,25 +32,21 @@ class TestImbalance(unittest.TestCase):
                 data=df,
                 n_samples=200,
                 target_col="target",
-                balance_target=True,
-                output_dir=self.output_dir,
+                balance=True,
+                output_dir=output_dir,
                 save_dataset=False,
             )
 
             if synth_df is None:
-                self.fail("Generator returned None")
+                pytest.fail("Generator returned None")
 
             # Check counts
             counts = synth_df["target"].value_counts(normalize=True)
             print(f"\nBalanced Output Counts:\n{counts}")
 
             # Should be roughly 0.5 each (allow some variance for iterative convergence)
-            self.assertTrue(
-                0.3 <= counts[0] <= 0.7, f"Class 0 proportion {counts[0]} not balanced"
-            )
-            self.assertTrue(
-                0.3 <= counts[1] <= 0.7, f"Class 1 proportion {counts[1]} not balanced"
-            )
+            assert 0.3 <= counts[0] <= 0.7, f"Class 0 proportion {counts[0]} not balanced"
+            assert 0.3 <= counts[1] <= 0.7, f"Class 1 proportion {counts[1]} not balanced"
 
         except ImportError as e:
             print(
@@ -65,10 +56,16 @@ class TestImbalance(unittest.TestCase):
             # I will let it fail so it shows in the report.
             raise e
         except Exception as e:
-            self.fail(f"Test failed with error: {e}")
+            pytest.fail(f"Test failed with error: {e}")
+    finally:
+        shutil.rmtree(output_dir)
 
-    def test_create_imbalance_from_balanced(self):
-        """Test B: Feed Balanced Data (50/50) -> Generate Imbalanced (90/10)."""
+
+def test_create_imbalance_from_balanced():
+    """Test B: Feed Balanced Data (50/50) -> Generate Imbalanced (90/10)."""
+    output_dir = tempfile.mkdtemp()
+    np.random.seed(42)
+    try:
         # Create balanced data
         n = 1000
         df = pd.DataFrame(
@@ -89,7 +86,7 @@ class TestImbalance(unittest.TestCase):
                 n_samples=500,
                 target_col="target",
                 custom_distributions=custom_dist,
-                output_dir=self.output_dir,
+                output_dir=output_dir,
                 save_dataset=False,
             )
 
@@ -98,10 +95,9 @@ class TestImbalance(unittest.TestCase):
             print(f"\nImposed Imbalance Output Counts:\n{counts}")
 
             # Should be roughly 0.9 for class 0
-            self.assertTrue(
-                0.8 <= counts[0] <= 1.0,
-                f"Class 0 proportion {counts[0]} did not match custom dist 0.9",
-            )
+            assert (
+                0.8 <= counts[0] <= 1.0
+            ), f"Class 0 proportion {counts[0]} did not match custom dist 0.9"
 
         except ImportError as e:
             print(
@@ -109,8 +105,6 @@ class TestImbalance(unittest.TestCase):
             )
             raise e
         except Exception as e:
-            self.fail(f"Test failed with error: {e}")
-
-
-if __name__ == "__main__":
-    unittest.main()
+            pytest.fail(f"Test failed with error: {e}")
+    finally:
+        shutil.rmtree(output_dir)

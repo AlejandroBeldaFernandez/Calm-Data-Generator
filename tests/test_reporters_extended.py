@@ -4,7 +4,7 @@ import numpy as np
 import tempfile
 import os
 import json
-from calm_data_generator.generators.tabular import QualityReporter
+from calm_data_generator.generators.tabular.QualityReporter import QualityReporter
 
 
 @pytest.fixture

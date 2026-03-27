@@ -67,6 +67,36 @@ df_evolved = injector.apply_config(df, scenario_conf)
 | `noise` | Fluctuación aleatoria | Error sensor, ruido mercado | `y = x + N(0, escala)` |
 | `random_walk` | Paseo aleatorio | Precios de acciones | `y = x + Σ N(0, paso_std)` |
 | `sigmoid` | Curva en S | Adopción tecnológica | `y = x + A / (1 + e^{-(t-c)/w})` |
+| `driven_by` | Dependencia inter-variable | Sensor IoT acoplado, escenarios causales | `delta = f(valor_driver_col)` |
+
+### `driven_by` — Evolución impulsada por otra columna
+
+Hace que el delta de una feature en cada fila dependa del **valor actual** de otra columna (no del índice de tiempo `t`).
+
+```python
+evolved_df = injector.evolve_features(df, evolution_config={
+    "pressure": {
+        "type":        "driven_by",
+        "driver_col":  "temperature",   # columna que impulsa el delta
+        "func":        "linear",        # "linear"|"exponential"|"power"|"polynomial"|callable
+        "func_params": {"slope": 0.8},
+    },
+    "humidity": {
+        "type":        "driven_by",
+        "driver_col":  "temperature",
+        "func":        "exponential",
+        "func_params": {"scale": 0.002, "rate": 0.05},
+    },
+})
+# Cada fila: delta_pressure = 0.8 * temperature_i
+# Cada fila: delta_humidity = 0.002 * exp(0.05 * temperature_i)
+```
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `driver_col` | str | Columna cuyo valor actual computa el delta por fila |
+| `func` | str | Función de transferencia: `"linear"`, `"exponential"`, `"power"`, `"polynomial"` o callable |
+| `func_params` | dict | Parámetros para `func` |
 
 ---
 

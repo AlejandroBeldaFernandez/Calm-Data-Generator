@@ -198,7 +198,69 @@ drifted_df = injector.inject_categorical_frequency_drift(
 
 ---
 
-## 🌟 Real-World Scenarios
+## Pilar 5: Functional Drift & Causal Cascades
+
+### `inject_functional_drift()` — Magnitude driven by another column
+
+Injects drift whose magnitude varies per row as a function of a driver column's current value.
+
+Use case: *sensor noise that scales exponentially with temperature.*
+
+```python
+df_result = injector.inject_functional_drift(
+    df,
+    target_cols=["sensor_reading"],
+    driver_col="temperature",
+    magnitude_func="exponential",    # "linear"|"exponential"|"power"|"polynomial"|callable
+    magnitude_params={"scale": 0.001, "rate": 0.1},
+    drift_type="additive",           # "additive" or "multiplicative"
+    # Optional row selection (same system as all other methods):
+    conditions=[{"column": "temperature", "operator": ">", "value": 30}],
+)
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `target_cols` | list[str] | Columns to perturb |
+| `driver_col` | str | Column whose values determine the per-row magnitude |
+| `magnitude_func` | str or callable | Transfer function: `"linear"`, `"exponential"`, `"power"`, `"polynomial"`, or a callable |
+| `magnitude_params` | dict | Parameters for `magnitude_func` (e.g. `{"scale": 0.01, "rate": 0.2}`) |
+| `drift_type` | str | `"additive"` (x += magnitude) or `"multiplicative"` (x *= magnitude) |
+
+### `inject_causal_cascade()` — DAG-based propagation
+
+Propagates a perturbation from a trigger variable through a user-defined causal DAG.
+
+Use case: *a temperature spike increases pressure, which exponentially degrades sensor reliability.*
+
+```python
+dag = {
+    "temperature": [],
+    "pressure":    [{"parent": "temperature", "func": "linear",      "params": {"slope": 1.2}}],
+    "sensor_fail": [{"parent": "pressure",    "func": "exponential", "params": {"scale": 0.001, "rate": 0.3}}],
+}
+
+df_result = injector.inject_causal_cascade(
+    df,
+    dag_config=dag,
+    trigger_col="temperature",
+    trigger_delta=5.0,           # scalar or array
+    # Optional: time_start, conditions, etc.
+)
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `dag_config` | dict | Causal DAG (see [CAUSAL_ENGINE_REFERENCE.md](CAUSAL_ENGINE_REFERENCE.md)) |
+| `trigger_col` | str | Root variable that receives the perturbation |
+| `trigger_delta` | float or np.ndarray | Magnitude of the initial perturbation |
+
+Supported transfer functions: `"linear"`, `"exponential"`, `"power"`, `"polynomial"`, callable.
+Propagation is differential: `delta_child = f(v_parent + delta) - f(v_parent)`.
+
+---
+
+## Real-World Scenarios
 
 ### Case 1: Sensor Degradation (Incremental + Noise)
 Simulating an IoT sensor that loses calibration and becomes noisier.

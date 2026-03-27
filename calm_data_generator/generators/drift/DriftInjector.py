@@ -20,8 +20,9 @@ import numpy as np
 from typing import List, Optional, Dict, Sequence, Tuple, Any, Union
 import warnings
 import os
-from calm_data_generator.generators.tabular.QualityReporter import QualityReporter
+from calm_data_generator.reports.QualityReporter import QualityReporter
 from calm_data_generator.generators.configs import DriftConfig
+from calm_data_generator.generators.utils.propagation import propagate_numeric_drift, apply_func
 
 # Suppress common warnings for cleaner output
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -523,62 +524,8 @@ class DriftInjector:
         correlations: Union[pd.DataFrame, Dict, bool],
         driver_std: Optional[float] = None,
     ) -> pd.DataFrame:
-        """
-        Propagates the drift (delta) from a driver column to other correlated columns.
-
-        Formula: Delta_Y = Correlation(X, Y) * (Std_Y / Std_X) * Delta_X
-        """
-        if correlations is None or correlations is False:
-            return df
-
-        # 1. Determine Correlation Matrix
-        if isinstance(correlations, bool) and correlations:
-            # Calculate correlation matrix from CURRENT data (or could use original?)
-            # Using current data to reflect current relationships
-            corr_matrix = df.corr()
-        elif isinstance(correlations, (pd.DataFrame, dict)):
-            corr_matrix = pd.DataFrame(correlations)
-        else:
-            return df
-
-        if driver_col not in corr_matrix.index:
-            return df
-
-        # 2. Get Driver Stats
-        if driver_std is None:
-            driver_std = df[driver_col].std()
-        if driver_std == 0 or np.isnan(driver_std):
-            return df
-
-        # 3. Iterate over other columns
-        target_cols = [
-            c
-            for c in df.columns
-            if c != driver_col and pd.api.types.is_numeric_dtype(df[c])
-        ]
-
-        for target_col in target_cols:
-            if target_col not in corr_matrix.columns:
-                continue
-
-            rho = corr_matrix.loc[driver_col, target_col]
-            if pd.isna(rho) or rho == 0:
-                continue
-
-            target_std = df[target_col].std()
-            if target_std == 0 or np.isnan(target_std):
-                continue
-
-            # Delta_Y ~ rho * (sigma_Y / sigma_X) * Delta_X
-            factor = rho * (target_std / driver_std)
-            delta_target = delta_driver * factor
-
-            # Apply to DataFrame
-            # We add to existing values
-            current_vals = df.loc[rows, target_col].to_numpy()
-            df.loc[rows, target_col] = current_vals + delta_target
-
-        return df
+        """Delegates to the shared propagate_numeric_drift utility."""
+        return propagate_numeric_drift(df, rows, driver_col, delta_driver, correlations, driver_std)
 
     def _apply_categorical_with_weights(
         self,
@@ -2137,6 +2084,246 @@ class DriftInjector:
                 warnings.warn(f"Failed to apply drift '{method_name}': {e}")
 
         return current_df
+
+    # ------------------------------------------------------------------
+    # Pilar 5: Functional Drift & Causal Cascades
+    # ------------------------------------------------------------------
+
+    def inject_functional_drift(
+        self,
+        df: pd.DataFrame,
+        target_cols: List[str],
+        driver_col: str,
+        magnitude_func: Union[str, Any],
+        magnitude_params: Optional[Dict] = None,
+        drift_type: str = "additive",
+        start_index: Optional[int] = None,
+        end_index: Optional[int] = None,
+        time_col: Optional[str] = None,
+        time_start: Optional[str] = None,
+        time_end: Optional[str] = None,
+        conditions: Optional[List[Dict]] = None,
+        output_dir: Optional[str] = None,
+        generator_name: Optional[str] = None,
+        **kwargs,
+    ) -> pd.DataFrame:
+        """
+        Injects drift whose magnitude varies per row as a function of driver_col's current value.
+
+        The magnitude of the perturbation applied to each row is computed as:
+            magnitude_i = f(driver_col_i)
+        where f is specified by magnitude_func and magnitude_params.
+
+        Use case: sensor noise that scales exponentially with temperature:
+            inject_functional_drift(
+                df, target_cols=["sensor_reading"],
+                driver_col="temperature",
+                magnitude_func="exponential",
+                magnitude_params={"scale": 0.001, "rate": 0.1},
+            )
+
+        Args:
+            df: Input DataFrame.
+            target_cols: Columns to perturb.
+            driver_col: Column whose values determine the per-row drift magnitude.
+            magnitude_func: Function name ("linear", "exponential", "power", "polynomial")
+                            or a callable that takes an ndarray and returns an ndarray.
+            magnitude_params: Parameters for magnitude_func (e.g. {"scale": 0.01, "rate": 0.2}).
+            drift_type: "additive" (x += magnitude) or "multiplicative" (x *= magnitude).
+            start_index, end_index: Row index range (optional).
+            time_col, time_start, time_end: Time-based row selection (optional).
+            conditions: List of condition dicts for row filtering (optional).
+            output_dir: If provided, generate a quality report.
+            generator_name: Label for the report.
+
+        Returns:
+            Modified DataFrame.
+        """
+        df_result = df.copy()
+
+        if driver_col not in df_result.columns:
+            raise ValueError(f"driver_col '{driver_col}' not found in DataFrame.")
+
+        missing = [c for c in target_cols if c not in df_result.columns]
+        if missing:
+            raise ValueError(f"target_cols not found in DataFrame: {missing}")
+
+        rows = self._get_target_rows(
+            df_result,
+            start_index=start_index,
+            end_index=end_index,
+            time_col=time_col,
+            time_start=time_start,
+            time_end=time_end,
+            **{k: v for k, v in kwargs.items()
+               if k in {"block_index", "block_column", "blocks", "time_ranges",
+                        "specific_times", "index_step"}},
+        )
+
+        # Apply additional conditions filter
+        if conditions:
+            mask = pd.Series(True, index=rows)
+            for cond in conditions:
+                col, op, val = cond["column"], cond["operator"], cond["value"]
+                series = df_result.loc[rows, col]
+                if op == ">":   mask &= series > val
+                elif op == ">=": mask &= series >= val
+                elif op == "<":  mask &= series < val
+                elif op == "<=": mask &= series <= val
+                elif op == "==": mask &= series == val
+                elif op == "!=": mask &= series != val
+                elif op == "in": mask &= series.isin(val)
+            rows = rows[mask]
+
+        driver_values = df_result.loc[rows, driver_col].values
+        magnitude = apply_func(magnitude_func, magnitude_params or {}, driver_values)
+
+        if drift_type == "additive":
+            df_result.loc[rows, target_cols] = (
+                df_result.loc[rows, target_cols].values + magnitude[:, np.newaxis]
+            )
+        elif drift_type == "multiplicative":
+            df_result.loc[rows, target_cols] = (
+                df_result.loc[rows, target_cols].values * magnitude[:, np.newaxis]
+            )
+        else:
+            raise ValueError(f"drift_type must be 'additive' or 'multiplicative', got '{drift_type}'.")
+
+        if (output_dir or self.output_dir) and (self.auto_report if output_dir is None else bool(output_dir)):
+            _out = output_dir or self.output_dir
+            _name = generator_name or self.generator_name or "DriftInjector"
+            try:
+                reporter = QualityReporter(verbose=True, minimal=self.minimal_report)
+                reporter.update_report_after_drift(
+                    original_df=df,
+                    drifted_df=df_result,
+                    output_dir=_out,
+                    drift_config={
+                        "generator_name": _name,
+                        "feature_cols": target_cols,
+                        "drift_type": "functional_drift",
+                        "driver_col": driver_col,
+                        "magnitude_func": str(magnitude_func),
+                    },
+                    time_col=time_col,
+                )
+            except Exception as e:
+                import warnings as _w
+                _w.warn(f"inject_functional_drift: report failed: {e}")
+
+        return df_result
+
+    def inject_causal_cascade(
+        self,
+        df: pd.DataFrame,
+        dag_config: Dict,
+        trigger_col: str,
+        trigger_delta: Union[float, Any],
+        start_index: Optional[int] = None,
+        end_index: Optional[int] = None,
+        time_col: Optional[str] = None,
+        time_start: Optional[str] = None,
+        time_end: Optional[str] = None,
+        conditions: Optional[List[Dict]] = None,
+        output_dir: Optional[str] = None,
+        generator_name: Optional[str] = None,
+        **kwargs,
+    ) -> pd.DataFrame:
+        """
+        Propagates a perturbation from trigger_col through a DAG of causal dependencies.
+
+        Each node in the DAG can have one or more parent edges with a transfer function
+        (linear, exponential, power, polynomial, or callable). The propagation is
+        differential: delta_child = f(v_parent + delta_parent) - f(v_parent).
+
+        DAG format:
+            {
+                "temperature": [],
+                "pressure": [
+                    {"parent": "temperature", "func": "linear", "params": {"slope": 1.2}}
+                ],
+                "sensor_fail": [
+                    {"parent": "pressure", "func": "exponential",
+                     "params": {"scale": 0.001, "rate": 0.3}}
+                ],
+            }
+
+        Args:
+            df: Input DataFrame.
+            dag_config: Causal DAG specification (see format above).
+            trigger_col: Column that receives the initial perturbation. Must be a DAG node.
+            trigger_delta: Scalar or array of perturbation values for trigger_col.
+            start_index, end_index: Row index range (optional).
+            time_col, time_start, time_end: Time-based row selection (optional).
+            conditions: List of condition dicts for row filtering (optional).
+            output_dir: If provided, generate a quality report.
+            generator_name: Label for the report.
+
+        Returns:
+            Modified DataFrame.
+        """
+        from calm_data_generator.generators.dynamics.CausalEngine import CausalEngine
+
+        df_result = df.copy()
+
+        rows = self._get_target_rows(
+            df_result,
+            start_index=start_index,
+            end_index=end_index,
+            time_col=time_col,
+            time_start=time_start,
+            time_end=time_end,
+            **{k: v for k, v in kwargs.items()
+               if k in {"block_index", "block_column", "blocks", "time_ranges",
+                        "specific_times", "index_step"}},
+        )
+
+        if conditions:
+            mask = pd.Series(True, index=rows)
+            for cond in conditions:
+                col, op, val = cond["column"], cond["operator"], cond["value"]
+                series = df_result.loc[rows, col]
+                if op == ">":    mask &= series > val
+                elif op == ">=": mask &= series >= val
+                elif op == "<":  mask &= series < val
+                elif op == "<=": mask &= series <= val
+                elif op == "==": mask &= series == val
+                elif op == "!=": mask &= series != val
+                elif op == "in": mask &= series.isin(val)
+            rows = rows[mask]
+
+        engine = CausalEngine(dag_config)
+        delta = (
+            np.full(len(rows), float(trigger_delta))
+            if np.isscalar(trigger_delta)
+            else np.asarray(trigger_delta, dtype=float)
+        )
+        engine.apply_cascade(df_result, trigger_col, delta, rows)
+
+        if (output_dir or self.output_dir) and (self.auto_report if output_dir is None else bool(output_dir)):
+            _out = output_dir or self.output_dir
+            _name = generator_name or self.generator_name or "DriftInjector"
+            try:
+                affected = [c for c in dag_config if c in df_result.columns]
+                reporter = QualityReporter(verbose=True, minimal=self.minimal_report)
+                reporter.update_report_after_drift(
+                    original_df=df,
+                    drifted_df=df_result,
+                    output_dir=_out,
+                    drift_config={
+                        "generator_name": _name,
+                        "feature_cols": affected,
+                        "drift_type": "causal_cascade",
+                        "trigger_col": trigger_col,
+                        "trigger_delta": str(trigger_delta),
+                    },
+                    time_col=time_col,
+                )
+            except Exception as e:
+                import warnings as _w
+                _w.warn(f"inject_causal_cascade: report failed: {e}")
+
+        return df_result
 
     def inject_feature_drift_abrupt(
         self,

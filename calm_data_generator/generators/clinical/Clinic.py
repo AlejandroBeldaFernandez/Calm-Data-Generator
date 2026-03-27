@@ -18,10 +18,10 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
 from calm_data_generator.generators.clinical.ClinicReporter import ClinicReporter
 from calm_data_generator.generators.configs import DateConfig, DriftConfig
-from calm_data_generator.generators.base import BaseGenerator
+from calm_data_generator.generators.complex.ComplexGenerator import ComplexGenerator
 
 
-class ClinicalDataGenerator(BaseGenerator):
+class ClinicalDataGenerator(ComplexGenerator):
     """
     A class to generate synthetic clinical data including demographic, gene expression, and protein data.
     """
@@ -221,47 +221,6 @@ class ClinicalDataGenerator(BaseGenerator):
         except Exception as e:
             print(f"⚠️ Failed to generate report for {name}: {e}")
 
-    def _generate_module_data(
-        self,
-        n_samples,
-        marginals_list,
-        sigma_module,
-        is_gene_module=False,
-        n_gene_vars=0,
-    ):
-        """
-        Generates correlated data for a module using Gaussian Copula.
-        This is a helper function for generating correlated demographic features.
-        """
-        n_mod_vars = len(marginals_list)
-
-        # Ensure the matrix is Positive Semi-Definite (PSD)
-        try:
-            np.linalg.cholesky(sigma_module)
-        except np.linalg.LinAlgError:
-            from scipy.linalg import eigh
-
-            eigvals, eigvecs = eigh(sigma_module)
-            eigvals[eigvals < 1e-6] = 1e-6
-            sigma_module_psd = eigvecs.dot(np.diag(eigvals)).dot(eigvecs.T)
-            v = np.sqrt(np.diag(sigma_module_psd))
-            sigma_module = sigma_module_psd / np.outer(v, v)
-
-        # Copula Algorithm
-        mean_vec = np.zeros(n_mod_vars)
-        Z_mod = np.random.multivariate_normal(
-            mean=mean_vec, cov=sigma_module, size=n_samples
-        )
-        import scipy.stats as stats
-
-        U_mod = stats.norm.cdf(Z_mod)
-
-        X_mod = np.zeros((n_samples, n_mod_vars))
-        for i, marginal in enumerate(marginals_list):
-            X_mod[:, i] = marginal.ppf(U_mod[:, i])
-
-        return X_mod
-
     def _design_gene_params_rnaseq(self, n_genes, gene_mean_log_center):
         """
         Designs r (size) and p (prob) parameters for Negative Binomial distribution (RNA-Seq).
@@ -382,7 +341,7 @@ class ClinicalDataGenerator(BaseGenerator):
                     f"demographic_correlations matrix shape {demographic_correlations.shape} does not match the number of demographic variables ({n_mod_vars})."
                 )
 
-        X_demo_raw = self._generate_module_data(
+        X_demo_raw = self._generate_correlated_module(
             n_samples, marginals_list, demographic_correlations
         )
         df_temp = pd.DataFrame(X_demo_raw, columns=ordered_col_names)
@@ -575,134 +534,6 @@ class ClinicalDataGenerator(BaseGenerator):
             demographic_marginals_for_corr,
         )
 
-    def _generate_conditional_data(
-        self,
-        n_samples,
-        conditioning_data,
-        conditioning_marginals,
-        target_marginals,
-        full_covariance,
-    ):
-        """
-        Generates data for target variables conditioned on existing data (conditioning_data)
-        using Gaussian Copula.
-
-        Args:
-            n_samples (int): Number of samples.
-            conditioning_data (np.ndarray): Existing data matrix (n_samples x n_cond).
-            conditioning_marginals (list): Marginals for conditioning variables.
-            target_marginals (list): Marginals for target variables.
-            full_covariance (np.ndarray): Full covariance matrix (n_cond + n_target) x (n_cond + n_target).
-
-        Returns:
-            np.ndarray: Generated target data (n_samples x n_target).
-        """
-        n_cond = len(conditioning_marginals)
-        n_target = len(target_marginals)
-
-        if conditioning_data.shape != (n_samples, n_cond):
-            raise ValueError(
-                f"conditioning_data shape {conditioning_data.shape} mismatch with n_samples {n_samples} or n_cond {n_cond}."
-            )
-
-        if full_covariance.shape != (n_cond + n_target, n_cond + n_target):
-            raise ValueError(
-                f"full_covariance shape {full_covariance.shape} mismatch with total variables {n_cond + n_target}."
-            )
-
-        # 1. Transform conditioning data to latent space Z_cond
-        Z_cond = np.zeros_like(conditioning_data, dtype=float)
-        for i, marginal in enumerate(conditioning_marginals):
-            # Check if marginal is discrete
-            is_discrete = False
-            if hasattr(marginal, "dist"):
-                if hasattr(marginal.dist, "pmf") or marginal.dist.name in [
-                    "binom",
-                    "poisson",
-                    "nbinom",
-                    "randint",
-                    "geom",
-                    "hypergeom",
-                    "logser",
-                    "planck",
-                    "boltzmann",
-                    "zipf",
-                    "dlaplace",
-                    "skellam",
-                ]:
-                    is_discrete = True
-
-            if is_discrete:
-                # Randomized Quantile Residuals (Jittering)
-                # U ~ Uniform(CDF(x-1), CDF(x))
-                data = conditioning_data[:, i]
-                u_high = marginal.cdf(data)
-                u_low = marginal.cdf(data - 1)
-
-                # Handle edge cases where u_low might be negative or u_high > 1 due to numerics
-                u_low = np.maximum(0, u_low)
-                u_high = np.minimum(1, u_high)
-
-                # Sample U uniformly in [u_low, u_high]
-                U = np.random.uniform(u_low, u_high)
-            else:
-                # Continuous case: U = CDF(x)
-                U = marginal.cdf(conditioning_data[:, i])
-
-            # Clip U to avoid infinity in Z
-            U = np.clip(U, 1e-6, 1 - 1e-6)
-            import scipy.stats as stats
-
-            Z_cond[:, i] = stats.norm.ppf(U)
-
-        # 2. Partition Covariance Matrix
-        # Sigma = [[S_cc, S_ct],
-        #          [S_tc, S_tt]]
-        S_cc = full_covariance[:n_cond, :n_cond]
-        S_ct = full_covariance[:n_cond, n_cond:]
-        S_tc = full_covariance[n_cond:, :n_cond]
-        S_tt = full_covariance[n_cond:, n_cond:]
-
-        # 3. Compute Conditional Parameters
-        # mu_cond = S_tc * inv(S_cc) * Z_cond.T
-        # Sigma_cond = S_tt - S_tc * inv(S_cc) * S_ct
-
-        try:
-            S_cc_inv = np.linalg.inv(S_cc)
-        except np.linalg.LinAlgError:
-            # Regularize if singular
-            S_cc_inv = np.linalg.inv(S_cc + np.eye(n_cond) * 1e-6)
-
-        mu_cond = S_tc.dot(S_cc_inv).dot(Z_cond.T).T  # (n_samples, n_target)
-        Sigma_cond = S_tt - S_tc.dot(S_cc_inv).dot(S_ct)
-
-        # Ensure Sigma_cond is PSD
-        try:
-            np.linalg.cholesky(Sigma_cond)
-        except np.linalg.LinAlgError:
-            from scipy.linalg import eigh
-
-            eigvals, eigvecs = eigh(Sigma_cond)
-            eigvals[eigvals < 1e-6] = 1e-6
-            Sigma_cond = eigvecs.dot(np.diag(eigvals)).dot(eigvecs.T)
-
-        # 4. Sample Z_target from Conditional Multivariate Normal
-        # Since mu_cond varies per sample, we sample Z_noise ~ N(0, Sigma_cond) and add mu_cond
-        Z_noise = np.random.multivariate_normal(
-            mean=np.zeros(n_target), cov=Sigma_cond, size=n_samples
-        )
-        Z_target = mu_cond + Z_noise
-
-        # 5. Transform Z_target to X_target using target marginals
-        import scipy.stats as stats
-
-        U_target = stats.norm.cdf(Z_target)
-        X_target = np.zeros((n_samples, n_target))
-        for i, marginal in enumerate(target_marginals):
-            X_target[:, i] = marginal.ppf(U_target[:, i])
-
-        return X_target
-
     def generate_gene_data(
         self,
         n_genes: int,
@@ -783,7 +614,7 @@ class ClinicalDataGenerator(BaseGenerator):
                 full_covariance=demographic_gene_correlations,
             )
         else:
-            X_genes_base = self._generate_module_data(
+            X_genes_base = self._generate_correlated_module(
                 n_total_samples,
                 base_gene_marginals,
                 gene_correlations
@@ -831,7 +662,7 @@ class ClinicalDataGenerator(BaseGenerator):
                             raise ValueError(
                                 f"Effect '{effect_name}' not found in definitions."
                             )
-                        self._apply_effect_to_patients(
+                        self.apply_stochastic_effects(
                             df_genes, subgroup_patient_ids, effect
                         )
 
@@ -893,7 +724,7 @@ class ClinicalDataGenerator(BaseGenerator):
                             raise ValueError(
                                 f"Effect '{effect_name}' not found in definitions."
                             )
-                        self._apply_effect_to_patients(
+                        self.apply_stochastic_effects(
                             df_genes, subgroup_patient_ids, effect
                         )
 
@@ -924,82 +755,6 @@ class ClinicalDataGenerator(BaseGenerator):
             )
 
         return df_genes
-
-    def _apply_effect_to_patients(self, df_omics, patient_ids, effect_config):
-        """Helper function to apply a single defined effect to a given set of patients."""
-        indices = effect_config["index"]
-        effect_type = effect_config["effect_type"]
-        effect_value = effect_config["effect_value"]
-        omics_cols_to_affect = df_omics.columns[indices]
-        n_patients = len(patient_ids)
-
-        if n_patients == 0:
-            return
-
-        # --- Apply actual effect logic ---
-        if effect_type in ["additive_shift", "fold_change", "power_transform"]:
-            if isinstance(effect_value, list) and len(effect_value) == 2:
-                patient_offsets = np.random.uniform(
-                    effect_value[0], effect_value[1], size=n_patients
-                )
-            else:
-                scale = abs(effect_value) * 0.1 + 1e-6
-                patient_offsets = np.random.normal(
-                    loc=effect_value, scale=scale, size=n_patients
-                )
-
-            if effect_type == "additive_shift":
-                df_omics.loc[patient_ids, omics_cols_to_affect] += patient_offsets[
-                    :, np.newaxis
-                ]
-            elif effect_type == "fold_change":
-                if np.any(patient_offsets <= 0):
-                    patient_offsets[patient_offsets <= 0] = 1e-6  # Ensure positive
-                df_omics.loc[patient_ids, omics_cols_to_affect] *= patient_offsets[
-                    :, np.newaxis
-                ]
-            elif effect_type == "power_transform":
-                df_omics.loc[patient_ids, omics_cols_to_affect] **= patient_offsets[
-                    :, np.newaxis
-                ]
-
-        elif effect_type == "variance_scale":
-            if isinstance(effect_value, list) and len(effect_value) == 2:
-                scaling_factors = np.random.uniform(
-                    effect_value[0], effect_value[1], size=len(omics_cols_to_affect)
-                )
-            else:
-                scaling_factors = effect_value
-
-            X_mod = df_omics.loc[patient_ids, omics_cols_to_affect]
-            mean = X_mod.mean(axis=0)
-            std = X_mod.std(axis=0)
-            Z = (X_mod - mean) / (std + 1e-8)
-            X_new = Z * (std * scaling_factors) + mean
-            df_omics.loc[patient_ids, omics_cols_to_affect] = X_new
-
-        elif effect_type == "log_transform":
-            epsilon = effect_value if isinstance(effect_value, (int, float)) else 1e-8
-            df_omics.loc[patient_ids, omics_cols_to_affect] = np.log(
-                df_omics.loc[patient_ids, omics_cols_to_affect] + epsilon
-            )
-
-        elif effect_type == "polynomial_transform":
-            p = np.poly1d(effect_value)
-            df_omics.loc[patient_ids, omics_cols_to_affect] = p(
-                df_omics.loc[patient_ids, omics_cols_to_affect]
-            )
-
-        elif effect_type == "sigmoid_transform":
-            X_mod = df_omics.loc[patient_ids, omics_cols_to_affect]
-            k = effect_value.get("k", 1)
-            x0 = effect_value.get("x0", X_mod.mean().mean())
-            df_omics.loc[patient_ids, omics_cols_to_affect] = 1 / (
-                1 + np.exp(-k * (X_mod - x0))
-            )
-
-        else:
-            raise ValueError(f"Unsupported effect_type '{effect_type}'.")
 
     def generate_protein_data(
         self,
@@ -1061,7 +816,7 @@ class ClinicalDataGenerator(BaseGenerator):
                 full_covariance=demographic_protein_correlations,
             )
         else:
-            X_proteins_base = self._generate_module_data(
+            X_proteins_base = self._generate_correlated_module(
                 n_total_samples,
                 base_protein_marginals,
                 protein_correlations
@@ -1078,7 +833,6 @@ class ClinicalDataGenerator(BaseGenerator):
         # --- 4. Apply Stochastic, Per-Patient Disease Effects ---
         if disease_effects_config and len(idx_disease) > 0:
             disease_patient_ids = patient_ids[idx_disease]
-            n_disease = len(disease_patient_ids)
 
             for effect in disease_effects_config:
                 # Validate required keys
@@ -1091,44 +845,14 @@ class ClinicalDataGenerator(BaseGenerator):
                         f"Invalid disease effect config. Missing 'effect_type' or 'effect_value' in {effect}."
                     )
 
-                indices = effect["index"]
-                effect_type = effect["effect_type"]
-                effect_value = effect["effect_value"]
-                protein_cols_to_affect = df_proteins.columns[indices]
-
-                # Generate a vector of independent, stochastic offsets
-                if isinstance(effect_value, list) and len(effect_value) == 2:
-                    patient_offsets = np.random.uniform(
-                        effect_value[0], effect_value[1], size=n_disease
-                    )
-                else:
-                    scale = abs(effect_value) * 0.1 + 1e-6
-                    patient_offsets = np.random.normal(
-                        loc=effect_value, scale=scale, size=n_disease
+                if effect.get("effect_type") == "additive_shift":
+                    self.logger.warning(
+                        "effect_type 'additive_shift' on protein data previously applied shifts "
+                        "in log-space (equivalent to fold_change). Use 'fold_change' for "
+                        "lognormal data, or 'simple_additive_shift' for direct additive shifts."
                     )
 
-                # Apply effects. For proteins (log-normal), additive shifts are applied in the log space,
-                # which translates to multiplicative (fold change) effects in the original space.
-                if effect_type == "additive_shift":
-                    # This is a fold-change in the original space
-                    fold_changes = np.exp(patient_offsets)
-                    df_proteins.loc[disease_patient_ids, protein_cols_to_affect] *= (
-                        fold_changes[:, np.newaxis]
-                    )
-                elif effect_type == "simple_additive_shift":
-                    # Direct additive shift in original space (User requested behavior)
-                    df_proteins.loc[disease_patient_ids, protein_cols_to_affect] += (
-                        patient_offsets[:, np.newaxis]
-                    )
-                elif effect_type == "variance_scale":
-                    print(
-                        f"Warning: 'variance_scale' is not supported with the per-patient stochastic effect model for proteins. Skipping effect '{effect['name']}'."
-                    )
-                    continue
-                else:
-                    raise ValueError(
-                        f"Unsupported effect_type '{effect_type}' in per-patient stochastic model for proteins."
-                    )
+                self.apply_stochastic_effects(df_proteins, disease_patient_ids, effect)
 
         # --- Dynamics Injection ---
         if dynamics_config:
@@ -1403,7 +1127,7 @@ class ClinicalDataGenerator(BaseGenerator):
         )
 
         # *** THIS IS THE CORRECTED CALL ***
-        generated_data_subset = self._generate_module_data(
+        generated_data_subset = self._generate_correlated_module(
             n_samples_filtered,
             marginals_to_use,
             correlation_matrix,

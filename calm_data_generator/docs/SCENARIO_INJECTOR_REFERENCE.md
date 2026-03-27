@@ -65,6 +65,36 @@ What do you want to do?
 | `seasonal` | Cyclical pattern | Holidays, weather, daily cycles | `y = x + A * sin(2πt/P)` |
 | `step` | Sudden jump | Policy change, price hike | `y = x + value if t > step` |
 | `noise` | Random fluctuation | Sensor error, market noise | `y = x + N(0, scale)` |
+| `driven_by` | Inter-variable dependency | IoT sensor coupling, causal scenarios | `delta = f(driver_col_value)` |
+
+### `driven_by` — Evolution driven by another column
+
+Makes a feature's delta at each row depend on the **current value** of another column (not on the time index `t`).
+
+```python
+evolved_df = injector.evolve_features(df, evolution_config={
+    "pressure": {
+        "type":        "driven_by",
+        "driver_col":  "temperature",   # column that drives the delta
+        "func":        "linear",        # "linear"|"exponential"|"power"|"polynomial"|callable
+        "func_params": {"slope": 0.8},
+    },
+    "humidity": {
+        "type":        "driven_by",
+        "driver_col":  "temperature",
+        "func":        "exponential",
+        "func_params": {"scale": 0.002, "rate": 0.05},
+    },
+})
+# Each row: delta_pressure = 0.8 * temperature_i
+# Each row: delta_humidity = 0.002 * exp(0.05 * temperature_i)
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `driver_col` | str | Column whose current value computes the per-row delta |
+| `func` | str | Transfer function: `"linear"`, `"exponential"`, `"power"`, `"polynomial"` or callable |
+| `func_params` | dict | Parameters for `func` |
 
 ---
 

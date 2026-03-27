@@ -67,7 +67,7 @@ print(synthetic["target"].value_counts())
 
 # Generate balanced data (equal classes)
 synthetic_balanced = gen.generate(
-    generator_instance=simple_stream(), n_samples=100, balance_target=True
+    generator_instance=simple_stream(), n_samples=100, balance=True
 )
 
 print("\n--- Balanced Generation ---")
@@ -82,7 +82,7 @@ print(synthetic_balanced["target"].value_counts())
 synthetic_smote = gen.generate(
     generator_instance=simple_stream(),
     n_samples=100,
-    balance_target=True,
+    balance=True,
     use_smote=True,
 )
 

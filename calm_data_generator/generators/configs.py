@@ -69,7 +69,12 @@ class EvolutionFeatureConfig(BaseModel):
     step_std: Optional[float] = None  # for random_walk
     step: Optional[float] = None      # for step
     value: Optional[float] = None     # for step
-    
+
+    # Fields for evolve_type "driven_by" (Pilar 5)
+    driver_col: Optional[str] = None      # column whose current value drives the delta
+    func: Optional[str] = None            # "linear"|"exponential"|"power"|"polynomial"
+    func_params: Optional[dict] = None    # parameters for func
+
     model_config = ConfigDict(extra="allow")  # Allow extra fields for flexibility
 
 

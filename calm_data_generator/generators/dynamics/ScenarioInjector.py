@@ -6,6 +6,7 @@ from calm_data_generator.generators.configs import (
     ScenarioConfig,
     EvolutionFeatureConfig,
 )
+from calm_data_generator.generators.utils.propagation import propagate_numeric_drift, apply_func
 
 
 class ScenarioInjector:
@@ -158,6 +159,19 @@ class ScenarioInjector:
                 steps = self.rng.normal(0, step_std, size=len(t))
                 delta = np.cumsum(steps)
 
+            elif drift_type == "driven_by":
+                driver_col = getattr(config, "driver_col", None)
+                if not driver_col or driver_col not in df_evolved.columns:
+                    raise ValueError(
+                        f"evolve_type 'driven_by' for column '{col}' requires a valid "
+                        f"'driver_col' pointing to an existing DataFrame column. "
+                        f"Got driver_col={driver_col!r}."
+                    )
+                driver_values = df_evolved[driver_col].values.astype(float)
+                func = getattr(config, "func", None) or "linear"
+                func_params = getattr(config, "func_params", None) or {}
+                delta = apply_func(func, func_params, driver_values)
+
             # Apply delta
             # Assuming additive drift for now. Could add 'mode': 'multiplicative' later.
             # Calculate current values before update for delta calculation if needed
@@ -181,7 +195,7 @@ class ScenarioInjector:
                 )
 
         if auto_report and output_dir:
-            from calm_data_generator.generators.tabular.QualityReporter import (
+            from calm_data_generator.reports.QualityReporter import (
                 QualityReporter,
             )
 
@@ -234,61 +248,8 @@ class ScenarioInjector:
         correlations: Union[pd.DataFrame, Dict, bool],
         driver_std: Optional[float] = None,
     ) -> pd.DataFrame:
-        """
-        Propagates the drift (delta) from a driver column to other correlated columns.
-
-        Formula: Delta_Y = Correlation(X, Y) * (Std_Y / Std_X) * Delta_X
-        """
-        if correlations is None or correlations is False:
-            return df
-
-        # 1. Determine Correlation Matrix
-        if isinstance(correlations, bool) and correlations:
-            corr_matrix = df.corr()
-        elif isinstance(correlations, (pd.DataFrame, dict)):
-            corr_matrix = pd.DataFrame(correlations)
-        else:
-            return df
-
-        if driver_col not in corr_matrix.index:
-            return df
-
-        # 2. Get Driver Stats
-        if driver_std is None:
-            driver_std = df[driver_col].std()
-
-        if driver_std == 0 or np.isnan(driver_std):
-            return df
-
-        # 3. Iterate over other columns
-        target_cols = [
-            c
-            for c in df.columns
-            if c != driver_col and pd.api.types.is_numeric_dtype(df[c])
-        ]
-
-        for target_col in target_cols:
-            if target_col not in corr_matrix.columns:
-                continue
-
-            rho = corr_matrix.loc[driver_col, target_col]
-            if pd.isna(rho) or rho == 0:
-                continue
-
-            target_std = df[target_col].std()
-            if target_std == 0 or np.isnan(target_std):
-                continue
-
-            # Delta_Y ~ rho * (sigma_Y / sigma_X) * Delta_X
-            factor = rho * (target_std / driver_std)
-            delta_target = delta_driver * factor
-
-            # Apply to DataFrame
-            # We add to existing values
-            current_vals = df.loc[rows, target_col].to_numpy()
-            df.loc[rows, target_col] = current_vals + delta_target
-
-        return df
+        """Delegates to the shared propagate_numeric_drift utility."""
+        return propagate_numeric_drift(df, rows, driver_col, delta_driver, correlations, driver_std)
 
     def construct_target(
         self,
@@ -504,7 +465,7 @@ class ScenarioInjector:
 
         # 5. Generate report if requested
         if auto_report and output_dir:
-            from calm_data_generator.generators.tabular.QualityReporter import (
+            from calm_data_generator.reports.QualityReporter import (
                 QualityReporter,
             )
 

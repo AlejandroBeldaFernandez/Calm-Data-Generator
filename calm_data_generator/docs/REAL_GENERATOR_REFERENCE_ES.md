@@ -94,7 +94,7 @@ synthetic_df = gen.generate(
 | `adversarial_validation` | bool | `False` | Activar reporte de discriminador (Real vs Sintético) |
 | `report_config` | ReportConfig | `None` | Objeto de configuración avanzada de informes |
 | `date_config` | DateConfig | `None` | Objeto de configuración avanzada de inyección de fechas |
-| `balance_target` | bool | `False` | Balancear automáticamente la distribución de clases en `target_col` |
+| `balance` | bool | `False` | Balancear automáticamente la distribución de clases en `target_col` |
 | `**kwargs` | Any | - | Parámetros específicos del método (ej., `epochs`, `n_latent`, `lr`) |
 
 ---
@@ -107,12 +107,14 @@ El diccionario `**kwargs` permite el ajuste fino de parámetros internos para ca
 
 | Parámetro | Métodos | Descripción |
 |-----------|---------|-------------|
-| `epochs` | `ctgan`, `tvae` | Número de épocas de entrenamiento (defecto: 300) |
-| `batch_size` | `ctgan`, `tvae` | Tamaño del batch de entrenamiento (defecto: 500) |
-| `lr` | `ctgan`, `tvae` | Tasa de aprendizaje (Learning rate) |
-| `differentiation_factor` | `tvae`, `scvi` | *(v1.2.0)* Desplaza los centroides de clase en el espacio latente para forzar la separabilidad. Utiliza el proceso unificado de 5 pasos. |
-| `clipping_mode` | `tvae`, `scvi` | *(v1.2.0)* Estrategia de recorte: `'strict'`, `'permissive'`, o `'none'`. (Por defecto: `'strict'`) |
-| `clipping_factor` | `tvae`, `scvi` | *(v1.2.0)* Porcentaje de margen para el modo `'permissive'` (Por defecto: `0.1`). |
+| `epochs` | `ctgan`, `tvae`, `rtvae`, `great`, `dpgan`, `pategan` | Número de épocas de entrenamiento (defecto: 300) |
+| `batch_size` | `ctgan`, `tvae`, `rtvae`, `great` | Tamaño del batch de entrenamiento (defecto: 500) |
+| `lr` | `ctgan`, `tvae`, `rtvae` | Tasa de aprendizaje (Learning rate) |
+| `differentiation_factor` | `tvae`, `rtvae`, `scvi` | Desplaza los centroides de clase en el espacio latente para forzar la separabilidad. |
+| `clipping_mode` | `tvae`, `rtvae`, `scvi` | Estrategia de recorte: `'strict'`, `'permissive'`, o `'none'`. (Por defecto: `'strict'`) |
+| `clipping_factor` | `tvae`, `rtvae`, `scvi` | Porcentaje de margen para el modo `'permissive'` (Por defecto: `0.1`). |
+| `epsilon` | `dpgan`, `pategan` | Presupuesto de privacidad ε — menor = más privado (defecto: 1.0) |
+| `delta` | `dpgan`, `pategan` | Parámetro δ de privacidad diferencial (defecto: 1e-5) |
 
 
 **Ejemplo:**
@@ -130,7 +132,7 @@ gen.generate(
 
 | Parámetro | Métodos | Descripción |
 |-----------|---------|-------------|
-| `balance_target` | Todos ML | Si es True y `target_col` existe, balancea clases antes de entrenar |
+| `balance` | Todos ML | Si es True y `target_col` existe, balancea clases antes de entrenar |
 | `n_estimators` | RF, LGBM | Número de árboles |
 | `max_depth` | CART, RF | Profundidad máxima |
 
@@ -138,7 +140,7 @@ gen.generate(
 ```python
 method="rf",
 target_col="churn",
-balance_target=True,
+balance=True,
 n_estimators=100,
 
 ```
@@ -224,7 +226,7 @@ synthetic = gen.generate(
 
 `RealGenerator` ofrece varias estrategias para trabajar con datasets fuertemente desbalanceados (ej. detección de fraude, diagnósticos raros):
 
-### 1. Re-balanceo Automático (`balance_target=True`)
+### 1. Re-balanceo Automático (`balance=True`)
 Utiliza técnicas de re-muestreo antes o durante el entrenamiento para generar un dataset sintético equilibrado.
 *   **Ideal para:** Entrenar modelos de clasificación robustos que requieren clases balanceadas.
 *   **Comportamiento:** Si el original es 99% clase A y 1% clase B, el resultado será aprox. 50% A y 50% B.
@@ -250,18 +252,101 @@ Si no se especifica ninguna opción, los modelos generativos avanzados (`ctgan`,
 
 | Método | Tipo | Descripción |
 |--------|------|-------------|
-| `cart` | ML | Árboles de Clasificación y Regresión (Rápido, bueno para estructura) |
-| `rf` | ML | Random Forest (Robusto, más lento que CART) |
+| `cart` | ML | Árboles de Clasificación y Regresión (FCS) |
+| `rf` | ML | Random Forest (FCS) |
+| `lgbm` | ML | LightGBM (FCS) |
+| `xgboost` | ML | XGBoost (FCS) |
 | `ctgan` | DL | Conditional GAN para tablas (Vía Synthcity) |
-| `tvae` | DL | Variational Autoencoder para tablas (Vía Synthcity) |
+| `tvae` | DL | Variational Autoencoder tabular (Vía Synthcity) |
+| `rtvae` | DL | VAE Tabular Regularizado con soporte de diferenciación latente |
+| `great` | DL | Síntesis tabular basada en LLM (GReaT, Vía Synthcity) |
+| `ddpm` | DL | Difusión Tabular TabDDPM (Vía Synthcity) |
+| `diffusion` | DL | Difusión Tabular (Experimental, PyTorch) |
 | `copula` | Estadístico | Síntesis basada en Copulas Gaussianas |
-| `diffusion` | DL | Difusión Tabular (DDPM) | **Experimental**. Requiere `calm-data-generator[deeplearning]` |
-| `smote` | Aug. | Sobremuestreo SMOTE | Instalación base |
-| `adasyn` | Aug. | Muestreo adaptativo ADASYN | Instalación base |
+| `gmm` | Estadístico | Modelos de Mezcla Gaussiana |
+| `kde` | Estadístico | Estimación de Densidad por Kernel |
+| `smote` | Aug. | Sobremuestreo SMOTE |
+| `adasyn` | Aug. | Muestreo adaptativo ADASYN |
+| `resample` | Aug. | Bootstrap Simple |
+| `dpgan` | Privacidad | GAN con Privacidad Diferencial (Vía Synthcity) |
+| `pategan` | Privacidad | PATE-GAN con garantías DP (Vía Synthcity) |
+| `scvi` | Single-Cell | scVI (Variational Inference) para RNA-seq |
+| `scanvi` | Single-Cell | scANVI (semi-supervisado, condicionado por clase) |
+| `gears` | Single-Cell | GEARS (Predicción de Perturbaciones) |
+| `conditional_drift` | Drift | Condicionamiento temporal con TVAE/CTGAN — aprende distribuciones por etapa |
+| `windowed_copula` | Drift | Cópula Gaussiana interpolada entre ventanas temporales |
+| `hmm` | Drift | Modelo Oculto de Markov — el drift emerge de transiciones entre regímenes |
 
-| `gmm` | Estadístico | Modelos de Mezcla Gaussiana | Instalación base |
-| `scvi` | Single-Cell | scVI (Variational Inference) para RNA-seq | Requiere `scvi-tools` |
-| `gears` | Single-Cell | GEARS (Predicción de Perturbaciones) | Requiere `gears` |
+---
+
+## Métodos de Generación con Drift Nativo
+
+### Drift Condicional (`conditional_drift`)
+
+Discretiza el eje temporal en `n_stages` etapas, entrena un modelo TVAE o CTGAN incluyendo la etapa como columna categórica y genera datos condicionados a cada etapa. El drift emerge de las diferencias de distribución entre etapas.
+
+| Parámetro | Defecto | Descripción |
+|-----------|---------|-------------|
+| `time_col` | `None` | Columna temporal para ordenar los datos. Si es `None`, se usa el índice |
+| `n_stages` | `5` | Número de etapas de drift |
+| `base_method` | `"tvae"` | Modelo base: `"tvae"` o `"ctgan"` |
+| `general_stages` | `None` | Etapas a generar (ej. `[3, 4]` para solo el final del drift). Si `None`, genera todas |
+
+**Ejemplo:**
+```python
+gen.generate(
+    df, 1000,
+    method="conditional_drift",
+    time_col="fecha",
+    n_stages=5,
+    base_method="tvae",
+    general_stages=[3, 4],
+)
+```
+
+---
+
+### Cópula por Ventanas (`windowed_copula`)
+
+Entrena una Cópula Gaussiana independiente por cada ventana temporal e interpola sus parámetros entre ventanas. Permite generar datos en cualquier punto intermedio del drift.
+
+| Parámetro | Defecto | Descripción |
+|-----------|---------|-------------|
+| `time_col` | `None` | Columna para ordenar los datos cronológicamente antes de ventanear |
+| `n_windows` | `5` | Número de ventanas temporales |
+| `generate_at` | `None` | Puntos de interpolación en `[0.0, 1.0]`. `0.0` = primera ventana, `1.0` = última. Si `None`, genera en todas las ventanas |
+
+> **Nota:** Solo columnas numéricas. Las columnas categóricas se ignoran.
+
+**Ejemplo:**
+```python
+gen.generate(
+    df, 1000,
+    method="windowed_copula",
+    time_col="timestamp",
+    n_windows=4,
+    generate_at=[0.0, 0.5, 1.0],
+)
+```
+
+---
+
+### HMM — Modelo Oculto de Markov (`hmm`)
+
+Modela los datos como K regímenes ocultos con distribuciones gaussianas distintas. El drift emerge naturalmente de las probabilidades de transición entre regímenes que el modelo aprende durante el entrenamiento.
+
+| Parámetro | Defecto | Descripción |
+|-----------|---------|-------------|
+| `n_components` | `4` | Número de regímenes ocultos |
+| `covariance_type` | `"full"` | Tipo de covarianza por régimen: `"full"`, `"diag"`, `"tied"`, `"spherical"` |
+| `n_iter` | `100` | Iteraciones del algoritmo EM |
+
+> **Nota:** Solo columnas numéricas. Requiere `hmmlearn>=0.3.0`.
+
+**Ejemplo:**
+```python
+gen.generate(df, 1000, method="hmm", n_components=3, covariance_type="diag")
+```
 
 ---
 
@@ -304,15 +389,20 @@ Si tus datos están fragmentados lógicamente (ej: por Tiendas, Países, Pacient
 
 ### 6. Manejo de Datos Desbalanceados (Imbalance)
 Si tu columna objetivo (`target`) tiene clases muy minoritarias que quieres potenciar:
-*   **Balanceo Automático:** Usa `balance_target=True`. El generador aplicará técnicas de sobremuestreo (SMOTE/RandomOverSampler) internamente para que el modelo aprenda por igual de todas las clases.
+*   **Balanceo Automático:** Usa `balance=True`. El generador aplicará técnicas de sobremuestreo (SMOTE/RandomOverSampler) internamente para que el modelo aprenda por igual de todas las clases.
     ```python
-    gen.generate(data, target_col="fraude", balance_target=True, method="cart")
+    gen.generate(data, target_col="fraude", balance=True, method="cart")
     ```
-*   **Distribución Personalizada:** Si quieres una proporción exacta (ej: 70% Clase A, 30% Clase B):
+*   **Distribución Personalizada:** Puedes forzar una distribución marginal específica para cualquier columna categórica usando `custom_distributions`. El comportamiento exacto depende del método de síntesis:
+    - **CTGAN / Deep Learning (Condicional):** Realiza *generación condicional real*. Genera conteos proporcionales exactos por clase directamente desde el modelo sintetizado, sin depender de un remuestreo posterior.
+    - **SMOTE / ADASYN:** Traduce la distribución solicitada a conteos absolutos y los aplica nativamente como `sampling_strategy` en `imbalanced-learn`.
+    - **GMM, TVAE, Copula, BN, scVI, DDPM:** Utiliza el método interno `_apply_postprocess_distribution`. Tras generar los datos sintéticos, remuestrea filas inteligentemente para cumplir las proporciones solicitadas preservando las correlaciones.
+    - **Series Temporales (TimeGAN, TimeVAE, fflows):** `custom_distributions` y `balance` no son aplicables a secuencias temporales. Se emitirá un warning y el argumento será ignorado.
+
     ```python
     gen.generate(data, target_col="nivel", custom_distributions={"nivel": {"Bajo": 0.7, "Alto": 0.3}})
     ```
-    *Nota: `balance_target` es un atajo para `custom_distributions={"col": "balanced"}`. Para desbalanceos extremos, los métodos de Deep Learning como `method="ctgan"` suelen ofrecer mayor estabilidad que los métodos basados en árboles.*
+    *Nota: `balance=True` es un atajo para `custom_distributions={"col": "balanced"}`.*
 ---
 ---
 
@@ -643,6 +733,69 @@ new_samples = loaded_gen.generate(n_samples=500)
 
 > **Advertencia:** Al generar desde un modelo cargado, **no debes** pasar `data` a `generate()`, pero **debes** pasar `n_samples`.
 
+> **Nota:** Los modelos scVI y scANVI usan un formato de guardado basado en directorios internamente. Estos se empaquetan dentro del archivo zip de forma transparente — `save`/`load` funciona igual que con todos los demás métodos.
+
+---
+
+## Métodos de Privacidad
+
+### `privatize()` — Aplicar Privacidad Diferencial a Datos Existentes
+
+Aplica mecanismos de privacidad diferencial directamente sobre un DataFrame real. A diferencia de `dpgan`/`pategan` (que entrenan un modelo generativo), `privatize` es una transformación directa de los datos de entrada.
+
+- **Columnas numéricas:** Se añade ruido Laplace o Gaussiano.
+- **Columnas categóricas:** Se aplica Respuesta Aleatorizada (Randomized Response).
+
+```python
+# Mecanismo Laplace (por defecto)
+private_df = gen.privatize(df, epsilon=1.0)
+
+# Mecanismo Gaussiano
+private_df = gen.privatize(df, epsilon=1.0, mechanism="gaussian", delta=1e-5)
+```
+
+| Parámetro | Tipo | Defecto | Descripción |
+|-----------|------|---------|-------------|
+| `data` | DataFrame | - | DataFrame de entrada a privatizar |
+| `epsilon` | float | `1.0` | Presupuesto de privacidad ε. Menor = más privado. |
+| `delta` | float | `None` | Requerido para el mecanismo Gaussiano. |
+| `numeric_sensitivity` | float | `1.0` | Sensibilidad global para columnas numéricas. |
+| `mechanism` | str | `'laplace'` | `'laplace'` o `'gaussian'` para columnas numéricas. |
+| `categorical_p` | float | `None` | Probabilidad de mantener la categoría real. Si None, se deriva de ε. |
+
+---
+
+## Modelos Personalizados: `generate_custom()` y `CustomPluginAdapter`
+
+### `generate_custom()` — Usar Cualquier Modelo Externo
+
+Envuelve cualquier modelo externo (sklearn, synthcity, copulae, etc.) para usarlo con `RealGenerator`. El adaptador detecta automáticamente la interfaz del modelo (`fit`/`train`, `generate`/`sample`/`random`). Puedes sobreescribir con lambdas explícitas para control total.
+
+```python
+from sklearn.neighbors import KernelDensity
+
+kde_model = KernelDensity(kernel='gaussian', bandwidth=0.5)
+
+synthetic_df = gen.generate_custom(
+    data=df,
+    model=kde_model,
+    n_samples=500,
+    fit_fn=lambda m, data: m.fit(data.values),
+    generate_fn=lambda m, n: pd.DataFrame(m.sample(n), columns=df.columns),
+    method_name="mi_kde",
+)
+```
+
+| Parámetro | Tipo | Defecto | Descripción |
+|-----------|------|---------|-------------|
+| `data` | DataFrame | - | Datos de entrenamiento |
+| `model` | any | - | Cualquier objeto modelo con fit/train y generate/sample/random |
+| `n_samples` | int | - | Número de muestras sintéticas a generar |
+| `fit_fn` | callable | `None` | `lambda model, data: ...` — sobreescribe el método fit auto-detectado |
+| `generate_fn` | callable | `None` | `lambda model, n: ...` — sobreescribe el método de generación auto-detectado |
+| `postprocess_fn` | callable | `None` | Post-procesa el DataFrame generado |
+| `method_name` | str | `"custom"` | Etiqueta para logging y metadatos |
+
 ---
 
 ## Mejores Prácticas
@@ -794,7 +947,7 @@ synth = gen.generate(
 
 ---
 
-## Novedades v1.2.0
+## Novedades v1.2.0 — v2.0.0
 
 ### Diferenciación en el Espacio Latente (`differentiation_factor`)
 

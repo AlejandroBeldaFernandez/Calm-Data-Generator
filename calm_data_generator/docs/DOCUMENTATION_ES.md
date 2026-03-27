@@ -1,10 +1,66 @@
 # Documentación de Calm Data Generator
 
-## Documentación de Motores Externos
-Para ajustes de hiperparámetros avanzados y detalles técnicos de los modelos subyacentes, por favor consulta:
-- **Synthcity**: [Manual de Referencia](https://github.com/vanderschaarlab/synthcity)
-- **scvi-tools**: [Guía de Usuario](https://docs.scvi-tools.org/)
-- **GEARS**: [Detalles de Implementación](https://github.com/snap-stanford/GEARS)
+## Referencia de Librerías
+
+Cada método de síntesis está respaldado por una o más librerías de código abierto. Las tablas siguientes muestran exactamente qué librería usa cada método, con enlace a su documentación oficial.
+
+### Métodos de Síntesis → Librería
+
+| Método | Librería Principal | Descripción | Docs |
+|--------|-------------------|-------------|------|
+| `cart` | [scikit-learn](https://scikit-learn.org/) | Especificación Completamente Condicional con Árboles de Decisión | [sklearn.tree](https://scikit-learn.org/stable/modules/tree.html) |
+| `rf` | [scikit-learn](https://scikit-learn.org/) | FCS con Random Forests | [sklearn.ensemble](https://scikit-learn.org/stable/modules/ensemble.html) |
+| `lgbm` | [LightGBM](https://lightgbm.readthedocs.io/) | FCS con gradient boosting; maneja categóricas nativamente | [docs lgbm](https://lightgbm.readthedocs.io/en/stable/) |
+| `xgboost` | [XGBoost](https://xgboost.readthedocs.io/) | FCS con extreme gradient boosting | [docs xgb](https://xgboost.readthedocs.io/en/stable/) |
+| `ctgan` | [Synthcity](https://github.com/vanderschaarlab/synthcity) | GAN Condicional para datos tabulares | [synthcity](https://github.com/vanderschaarlab/synthcity) |
+| `tvae` | [Synthcity](https://github.com/vanderschaarlab/synthcity) | Autoencoder Variacional para datos tabulares | [synthcity](https://github.com/vanderschaarlab/synthcity) |
+| `ddpm` | [Synthcity](https://github.com/vanderschaarlab/synthcity) | Modelo de Difusión Probabilístico (Denoising DDPM) | [synthcity](https://github.com/vanderschaarlab/synthcity) |
+| `diffusion` | [PyTorch](https://pytorch.org/) | Difusión custom ligera (sin Synthcity) | [docs torch](https://pytorch.org/docs/) |
+| `timegan` | [Synthcity](https://github.com/vanderschaarlab/synthcity) | GAN para series temporales | [synthcity](https://github.com/vanderschaarlab/synthcity) |
+| `timevae` | [Synthcity](https://github.com/vanderschaarlab/synthcity) | VAE para series temporales | [synthcity](https://github.com/vanderschaarlab/synthcity) |
+| `fflows` | [Synthcity](https://github.com/vanderschaarlab/synthcity) | Flujos normalizantes para series periódicas | [synthcity](https://github.com/vanderschaarlab/synthcity) |
+| `great` | [Synthcity](https://github.com/vanderschaarlab/synthcity) | Método tabular basado en grafos | [synthcity](https://github.com/vanderschaarlab/synthcity) |
+| `rtvae` | [Synthcity](https://github.com/vanderschaarlab/synthcity) | TVAE recurrente para datos secuenciales | [synthcity](https://github.com/vanderschaarlab/synthcity) |
+| `bn` | [Synthcity](https://github.com/vanderschaarlab/synthcity) | Redes Bayesianas con aprendizaje de estructura | [synthcity](https://github.com/vanderschaarlab/synthcity) |
+| `dpgan` | [Synthcity](https://github.com/vanderschaarlab/synthcity) | GAN con Privacidad Diferencial | [synthcity](https://github.com/vanderschaarlab/synthcity) |
+| `pategan` | [Synthcity](https://github.com/vanderschaarlab/synthcity) | Private Aggregation of Teacher Ensembles GAN | [synthcity](https://github.com/vanderschaarlab/synthcity) |
+| `copula` | [Copulae](https://copulae.readthedocs.io/) | Cópula Gaussiana con escalado Min-Max | [docs copulae](https://copulae.readthedocs.io/) |
+| `windowed_copula` | [Copulae](https://copulae.readthedocs.io/) | Múltiples cópulas para ventanas temporales no estacionarias | [docs copulae](https://copulae.readthedocs.io/) |
+| `gmm` | [scikit-learn](https://scikit-learn.org/) | Modelos de Mezcla Gaussiana | [sklearn.mixture](https://scikit-learn.org/stable/modules/mixture.html) |
+| `kde` | [scikit-learn](https://scikit-learn.org/) | Estimación de Densidad por Kernel | [sklearn.neighbors](https://scikit-learn.org/stable/modules/density.html) |
+| `hmm` | [hmmlearn](https://hmmlearn.readthedocs.io/) | Modelos Ocultos de Markov | [docs hmmlearn](https://hmmlearn.readthedocs.io/) |
+| `smote` | [imbalanced-learn](https://imbalanced-learn.org/) | Sobremuestreo SMOTE | [docs imblearn](https://imbalanced-learn.org/stable/) |
+| `adasyn` | [imbalanced-learn](https://imbalanced-learn.org/) | Muestreo adaptativo ADASYN | [docs imblearn](https://imbalanced-learn.org/stable/) |
+| `scvi` | [scvi-tools](https://docs.scvi-tools.org/) | VAE para scRNA-seq | [docs scvi](https://docs.scvi-tools.org/) |
+| `scanvi` | [scvi-tools](https://docs.scvi-tools.org/) | scVI semi-supervisado con etiquetas de tipo celular | [docs scvi](https://docs.scvi-tools.org/) |
+| `gears` | [GEARS](https://github.com/snap-stanford/GEARS) | Predicción de perturbaciones con GNN | [docs gears](https://github.com/snap-stanford/GEARS) |
+| `conditional_drift` | [Synthcity](https://github.com/vanderschaarlab/synthcity) | Generación por etapas para simular drift de distribución | [synthcity](https://github.com/vanderschaarlab/synthcity) |
+| `resample` | [scikit-learn](https://scikit-learn.org/) | Bootstrap resampling | [sklearn.utils](https://scikit-learn.org/stable/modules/generated/sklearn.utils.resample.html) |
+
+### Generadores → Librerías
+
+| Generador | Librerías Utilizadas |
+|-----------|---------------------|
+| **RealGenerator** | scikit-learn, Synthcity, LightGBM, XGBoost, Copulae, imbalanced-learn, hmmlearn, scvi-tools, GEARS, PyTorch |
+| **ClinicalDataGenerator** | NumPy, Pandas, SciPy (`stats`, `linalg`) — vía ComplexGenerator |
+| **ComplexGenerator** | SciPy (`linalg.eigh`, `stats`), NumPy — motores de Cópula Gaussiana |
+| **StreamGenerator** | NumPy, Pandas, DriftInjector |
+| **StreamGeneratorFactory** | [River](https://riverml.xyz/) — extra opcional `[stream]` |
+| **DriftInjector** | NumPy, Pandas, QualityReporter |
+| **ScenarioInjector** | NumPy, Pandas |
+| **CausalEngine** | NumPy, Pandas |
+| **QualityReporter** | scikit-learn, [SDMetrics](https://docs.sdv.dev/sdmetrics/), [Plotly](https://plotly.com/python/), [YData Profiling](https://ydata-profiling.ydata.ai/) |
+
+### Dependencias Matemáticas Base
+
+| Librería | Versión | Rol | Docs |
+|----------|---------|-----|------|
+| [NumPy](https://numpy.org/) | `>=1.26, <2.0` | Arrays numéricos, álgebra lineal | [docs numpy](https://numpy.org/doc/) |
+| [Pandas](https://pandas.pydata.org/) | `>=2.3` | DataFrames, manipulación de datos | [docs pandas](https://pandas.pydata.org/docs/) |
+| [SciPy](https://docs.scipy.org/) | `>=1.10, <1.15` | Distribuciones, reparación de matrices PSD, estadísticas | [docs scipy](https://docs.scipy.org/) |
+| [PyTorch](https://pytorch.org/) | `>=2.2, <2.4` | Infraestructura de deep learning | [docs torch](https://pytorch.org/docs/) |
+
+---
 
 Bienvenido a la documentación completa de **Calm Data Generator**. Esta guía cubre la instalación, configuración y uso avanzado de todos los módulos.
 
@@ -109,7 +165,7 @@ Puedes pasar parámetros específicos al modelo subyacente a través de `**kwarg
 **Para métodos basados en ML (LGBM):**
 - `n_estimators`: Número de árboles.
 - `max_depth`: Profundidad máxima.
-- `balance_target`: `True` para reequilibrar clases antes de entrenar.
+- `balance`: `True` para reequilibrar clases antes de entrenar.
 - `differentiation_factor`: Factor de separación latente (v1.2.0).
 - `clipping_mode`: Estrategia de recorte (`'strict'`, `'permissive'`, `'none'`).
 - `use_latent_sampling`: `True` para mayor fidelidad biológica.
@@ -334,4 +390,64 @@ synth = gen.generate(
     scheduler='cosine'
 )
 ```
+
+---
+
+## Presets
+
+Los presets son configuraciones de generador listas para usar que encapsulan selección de método, hiperparámetros y reportes para los escenarios más comunes. Cada preset expone una única llamada `.generate()`.
+
+Todos los presets comparten estos parámetros de constructor:
+
+| Parámetro | Por defecto | Descripción |
+|-----------|-------------|-------------|
+| `random_state` | `42` | Semilla aleatoria |
+| `verbose` | `True` | Mostrar mensajes de progreso |
+| `fast_dev_run` | `False` | Iteraciones mínimas — para testing de pipelines |
+
+### Categorías de Presets
+
+| Categoría | Preset | Método | Configuración Clave |
+|-----------|--------|--------|---------------------|
+| **Velocidad** | `FastPreset` | LightGBM | 10 iteraciones, reenvía kwargs |
+| **Velocidad** | `FastPrototypePreset` | LightGBM | 10 iteraciones fijas, sin kwargs |
+| **Calidad** | `HighFidelityPreset` | CTGAN | 1000 épocas, batch 250, validación adversarial |
+| **Calidad** | `DiffusionPreset` | TabDDPM | 1000 pasos de difusión |
+| **Calidad** | `CopulaPreset` | Cópula Gaussiana | Línea base estadística rápida |
+| **Calidad** | `DataQualityAuditPreset` | TVAE | 300 épocas, reporte completo forzado |
+| **Distribución** | `ImbalancedGeneratorPreset` | CTGAN | Proporción minoría/mayoría personalizada |
+| **Distribución** | `BalancedDataGeneratorPreset` | SMOTE | Sobremuestreo para balancear |
+| **Series Temp.** | `TimeSeriesPreset` | TimeGAN/TimeVAE/FourierFlows | 500 épocas, modelos temporales |
+| **Series Temp.** | `SeasonalTimeSeriesPreset` | TimeGAN + ScenarioInjector | Estacionalidad sinusoidal |
+| **Drift** | `DriftScenarioPreset` | CTGAN + DriftConfig | Prueba de estrés de drift |
+| **Drift** | `GradualDriftPreset` | CTGAN + drift lineal | Drift lineal lento |
+| **Drift** | `ConceptDriftPreset` | CTGAN + concept drift | Cambios en P(y\|x) |
+| **Drift** | `ScenarioInjectorPreset` | ScenarioInjector | Transformar datos existentes |
+| **Clínico** | `LongitudinalHealthPreset` | ClinicalDataGenerator | Pacientes multi-visita |
+| **Clínico** | `RareDiseasePreset` | ClinicalDataGenerator | Prevalencia 1% de enfermedad |
+| **Clínico** | `OmicsIntegrationPreset` | ClinicalDataGenerator | Clínico + genes + proteínas |
+| **Clínico** | `SingleCellQualityPreset` | scVI | 400 épocas, n_latent=10 |
+
+### Uso
+
+```python
+from calm_data_generator.presets import FastPreset, HighFidelityPreset, ImbalancedGeneratorPreset
+
+# Generación rápida
+preset = FastPreset(random_state=42)
+synthetic_df = preset.generate(data=real_df, n_samples=1000)
+
+# Datos de producción de alta fidelidad
+preset = HighFidelityPreset(random_state=42)
+synthetic_df = preset.generate(data=real_df, n_samples=5000)
+
+# Dataset desbalanceado (5% minoría)
+preset = ImbalancedGeneratorPreset(random_state=42)
+synthetic_df = preset.generate(
+    data=real_df, n_samples=2000,
+    target_col="etiqueta", imbalance_ratio=0.05
+)
+```
+
+Referencia completa de parámetros por preset: [PRESETS_REFERENCE_ES.md](PRESETS_REFERENCE_ES.md)
 

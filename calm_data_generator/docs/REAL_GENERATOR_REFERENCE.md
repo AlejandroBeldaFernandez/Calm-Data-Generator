@@ -93,7 +93,7 @@ synthetic_df = gen.generate(
 | `adversarial_validation` | bool | `False` | Activate Discriminator Report (Real vs Synthetic) |
 | `report_config` | ReportConfig | `None` | Advanced reporting configuration object |
 | `date_config` | DateConfig | `None` | Advanced date injection configuration object |
-| `balance_target` | bool | `False` | Automatically balance class distribution in `target_col` |
+| `balance` | bool | `False` | Automatically balance class distribution in `target_col` |
 | `**kwargs` | Any | - | Method-specific parameters (e.g., `epochs`, `n_latent`, `lr`) |
 
 ---
@@ -106,23 +106,50 @@ The `model_params` dictionary allows fine-tuning internal parameters for each sy
 
 | Parameter | Methods | Description |
 |-----------|---------|-------------|
-| `epochs` | `ctgan`, `tvae` | Number of training epochs (default: 300) |
-| `batch_size` | `ctgan`, `tvae` | Training batch size (default: 500) |
-| `lr` | `ctgan`, `tvae` | Learning rate |
-| `differentiation_factor` | `tvae`, `scvi` | *(v1.2.0)* Shift class centroids apart in latent space to force separability. Uses the unified 5-step process. |
-| `clipping_mode` | `tvae`, `scvi` | *(v1.2.0)* Clipping strategy: `'strict'`, `'permissive'`, or `'none'`. (Default: `'strict'`) |
-| `clipping_factor` | `tvae`, `scvi` | *(v1.2.0)* Percentage of range margin for `'permissive'` mode (Default: `0.1`). |
+| `epochs` | `ctgan`, `tvae`, `rtvae`, `great`, `dpgan`, `pategan` | Number of training epochs (default: 300) |
+| `batch_size` | `ctgan`, `tvae`, `rtvae`, `great` | Training batch size (default: 500) |
+| `lr` | `ctgan`, `tvae`, `rtvae` | Learning rate |
+| `differentiation_factor` | `tvae`, `rtvae`, `scvi` | Shift class centroids apart in latent space to force separability. |
+| `clipping_mode` | `tvae`, `rtvae`, `scvi` | Clipping strategy: `'strict'`, `'permissive'`, or `'none'`. (Default: `'strict'`) |
+| `clipping_factor` | `tvae`, `rtvae`, `scvi` | Percentage of range margin for `'permissive'` mode (Default: `0.1`). |
 
 **Example:**
 ```python
 gen.generate(
-    df, 1000, 
+    df, 1000,
     method="ctgan",
-    epochs=500, 
+    epochs=500,
     batch_size=256
 )
 ```
 
+### RTVAE (Regularized Tabular VAE)
+
+| Parameter | Description |
+|-----------|-------------|
+| `epochs` | Training epochs (default: 300) |
+| `batch_size` | Training batch size (default: 500) |
+| `differentiation_factor` | Latent space class separation factor |
+| `clipping_mode` | `'strict'`, `'permissive'`, or `'none'` |
+
+**Example:**
+```python
+gen.generate(df, 1000, method="rtvae", epochs=200, differentiation_factor=0.3, target_col="label")
+```
+
+### GReaT (LLM-based Tabular Synthesis)
+
+| Parameter | Description |
+|-----------|-------------|
+| `epochs` | Training epochs (default: 100) |
+| `batch_size` | Training batch size (default: 32) |
+
+**Example:**
+```python
+gen.generate(df, 500, method="great", epochs=50)
+```
+
+> **Note:** GReaT uses a language model internally and may be slow. It excels at preserving complex semantic correlations.
 
 ### CART (Decision Trees)
 
@@ -165,6 +192,20 @@ model_params={"n_estimators": 100, "min_samples_leaf": 3, "max_depth": 15}
 model_params={"n_estimators": 200, "learning_rate": 0.05, "max_depth": 8}
 ```
 
+### XGBoost
+
+| Parameter | Description |
+|-----------|-------------|
+| `iterations` | Number of FCS iterations (default: 10) |
+| `n_estimators` | Number of boosting rounds |
+| `learning_rate` | Learning rate |
+| `**kwargs` | Any parameter supported by XGBoost |
+
+**Example:**
+```python
+gen.generate(df, 1000, method="xgboost", n_estimators=100, learning_rate=0.1, target_col="target")
+```
+
 ### Gaussian Mixture Models
 
 | Parameter | Description |
@@ -177,6 +218,20 @@ model_params={"n_estimators": 200, "learning_rate": 0.05, "max_depth": 8}
 ```python
 model_params={"n_components": 10, "covariance_type": "diag"}
 ```
+
+### KDE (Kernel Density Estimation)
+
+| Parameter | Description |
+|-----------|-------------|
+| `bandwidth` | Bandwidth for the kernel (default: `'scott'`) |
+| `kernel` | Kernel type: `'gaussian'`, `'tophat'`, etc. (default: `'gaussian'`) |
+
+**Example:**
+```python
+gen.generate(df, 500, method="kde", bandwidth=0.5)
+```
+
+> **Note:** KDE works best with purely numeric data. Categorical columns are not supported natively.
 
 ### SMOTE / ADASYN
 
@@ -211,17 +266,34 @@ synthetic = gen.generate(
 
 > **Note:** Valid perturbations must be present in the GEARS Gene Ontology graph.
 
-### Differential Privacy
+### Privacy-Preserving Methods
+
+#### DPGAN
 
 | Parameter | Description |
 |-----------|-------------|
-| `epsilon` | Privacy ε parameter (default: 1.0, lower = more private) |
+| `epsilon` | Privacy ε budget — lower = more private (default: 1.0) |
 | `delta` | Privacy δ parameter (default: 1e-5) |
-| `synth_type` | Synthesizer type: "dpgan", "pategan", "adsgan" (default: "dpgan") |
+| `epochs` | Training epochs (default: 300) |
 
 **Example:**
 ```python
-model_params={"epsilon": 0.5, "delta": 1e-6, "synth_type": "dpgan"}
+gen.generate(df, 1000, method="dpgan", epsilon=0.5, delta=1e-5)
+```
+
+#### PATE-GAN
+
+| Parameter | Description |
+|-----------|-------------|
+| `epsilon` | Privacy ε budget — lower = more private (default: 1.0) |
+| `delta` | Privacy δ parameter (default: 1e-5) |
+| `epochs` | Training epochs (default: 300) |
+| `teacher_iters` | Teacher training iterations |
+| `student_iters` | Student training iterations |
+
+**Example:**
+```python
+gen.generate(df, 1000, method="pategan", epsilon=1.0, delta=1e-5)
 ```
 
 ### DataSynthesizer
@@ -234,6 +306,72 @@ model_params={"epsilon": 0.5, "delta": 1e-6, "synth_type": "dpgan"}
 ```python
 model_params={"k": 3}  # Higher k captures more correlations
 ```
+
+### Drift-Aware Methods
+
+#### Conditional Drift
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `time_col` | `None` | Column used to order rows by time. If `None`, row index is used |
+| `n_stages` | `5` | Number of discrete drift stages to discretize the time axis into |
+| `base_method` | `"tvae"` | Underlying Synthcity model: `"tvae"` or `"ctgan"` |
+| `general_stages` | `None` | List of stage indices to generate (e.g. `[3, 4]` for end drift only). If `None`, generates all stages evenly |
+
+**Example:**
+```python
+gen.generate(
+    df, 1000,
+    method="conditional_drift",
+    time_col="date",
+    n_stages=5,
+    base_method="tvae",
+    general_stages=[3, 4],   # Only generate from late drift stages
+)
+```
+
+#### Windowed Copula
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `time_col` | `None` | Column used to sort data chronologically before windowing |
+| `n_windows` | `5` | Number of time windows to fit independent copulas on |
+| `generate_at` | `None` | List of interpolation points in `[0.0, 1.0]`. `0.0` = first window, `1.0` = last window. If `None`, generates evenly across all windows |
+
+> **Note:** Only numeric columns are supported. Categorical columns are ignored.
+
+**Example:**
+```python
+gen.generate(
+    df, 1000,
+    method="windowed_copula",
+    time_col="timestamp",
+    n_windows=4,
+    generate_at=[0.0, 0.5, 1.0],   # Start, middle, end of drift
+)
+```
+
+#### HMM (Hidden Markov Model)
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `n_components` | `4` | Number of hidden regimes (more = more diverse drift patterns) |
+| `covariance_type` | `"full"` | Covariance matrix type per regime: `"full"`, `"diag"`, `"tied"`, `"spherical"` |
+| `n_iter` | `100` | EM algorithm iterations for fitting |
+
+> **Note:** Only numeric columns are supported. Drift emerges naturally from regime transitions.
+
+**Example:**
+```python
+gen.generate(
+    df, 1000,
+    method="hmm",
+    n_components=3,
+    covariance_type="diag",
+)
+```
+
+---
 
 ### Diffusion Models
 
@@ -256,22 +394,35 @@ model_params={"diffusion_steps": 100}
 |--------|-------------|----------------|--------------|
 | `ctgan` | Conditional Tabular GAN | `epochs`, `batch_size`, `lr` | Synthcity |
 | `tvae` | Tabular Variational Autoencoder | `epochs`, `batch_size` | Synthcity |
+| `rtvae` | Regularized Tabular VAE | `epochs`, `batch_size`, `differentiation_factor` | Synthcity |
+| `great` | GReaT (LLM-based tabular synthesis) | `epochs`, `batch_size` | Synthcity |
+| `ddpm` | Tabular Diffusion (TabDDPM) | `n_iter`, `num_timesteps`, `scheduler` | Synthcity |
 | `diffusion` | Tabular Diffusion Models | `steps` | PyTorch |
 
 ### Statistical Models
 
 | Method | Description | Key Parameters |
 |--------|-------------|----------------|
-| `gmm` | Gaussian Mixture Model | `gmm_n_components`, `gmm_covariance_type` |
-| `copula` | Copula | Copula-based synthesis | Base installation |
+| `gmm` | Gaussian Mixture Model | `n_components`, `covariance_type` |
+| `copula` | Copula-based synthesis | - |
+| `kde` | Kernel Density Estimation | `bandwidth`, `kernel` |
+
+### Drift-Aware Generation
+
+| Method | Description | Key Parameters | Dependencies |
+|--------|-------------|----------------|--------------|
+| `conditional_drift` | Temporal conditioning via TVAE/CTGAN — learns stage-dependent distributions | `time_col`, `n_stages`, `base_method`, `general_stages` | Synthcity |
+| `windowed_copula` | Gaussian Copula interpolated across time windows | `time_col`, `n_windows`, `generate_at` | copulae |
+| `hmm` | Hidden Markov Model — drift emerges from regime transitions | `n_components`, `covariance_type`, `n_iter` | hmmlearn |
 
 ### Fully Conditional Specification (FCS)
 
 | Method | Description | Key Parameters |
 |--------|-------------|----------------|
-| `cart` | Decision Trees | `min_samples_leaf`, `iterations` |
-| `rf` | Random Forest | `n_estimators`, `min_samples_leaf`, `iterations` |
-| `lgbm` | LightGBM | `n_estimators`, `learning_rate`, `iterations` |
+| `cart` | Decision Trees (FCS) | `min_samples_leaf`, `iterations` |
+| `rf` | Random Forest (FCS) | `n_estimators`, `min_samples_leaf`, `iterations` |
+| `lgbm` | LightGBM (FCS) | `n_estimators`, `learning_rate`, `iterations` |
+| `xgboost` | XGBoost (FCS) | `n_estimators`, `learning_rate`, `iterations` |
 
 ### Oversampling
 
@@ -281,19 +432,21 @@ model_params={"diffusion_steps": 100}
 | `adasyn` | Adaptive SMOTE | `n_neighbors` |
 | `resample` | Simple Bootstrap | - |
 
-### Privacy
+### Privacy-Preserving
 
 | Method | Description | Key Parameters |
 |--------|-------------|----------------|
-| `dp` | Differential Privacy | `epsilon`, `delta` |
+| `dpgan` | Differentially Private GAN | `epsilon`, `delta`, `epochs` |
+| `pategan` | PATE-GAN | `epsilon`, `delta`, `teacher_iters`, `student_iters` |
+| `dp` | Differential Privacy (legacy) | `epsilon`, `delta` |
 | `datasynth` | DataSynthesizer | `k` |
-
 
 ### Single-Cell / High-Dimensional
 
 | Method | Description | Key Parameters | Dependencies |
 |--------|-------------|----------------|--------------|
 | `scvi` | scVI Variational Autoencoder | `epochs`, `n_latent`, `n_layers` | scvi-tools |
+| `scanvi` | scANVI (semi-supervised scVI) | `epochs`, `n_latent`, `target_col` | scvi-tools |
 | `gears` | GEARS Perturbation Prediction | `perturbations`, `epochs`, `batch_size` | gears |
 
 ---
@@ -304,14 +457,19 @@ Choose the right method based on your data and requirements:
 
 | Use Case | Recommended Methods | Why |
 |----------|---------------------|-----|
-| **General tabular data** | `ctgan`, `tvae` | Best balance of quality and speed |
-| **Small datasets (< 1000 rows)** | `cart`, `rf`, `gmm` | Don't overfit, fast |
-| **Large datasets (> 100k rows)** | `lgbm`, `ctgan` | Scalable |
-| **Preserve correlations** | `ctgan`| Capture feature relationships |
+| **General tabular data** | `ctgan`, `tvae`, `rtvae` | Best balance of quality and speed |
+| **Small datasets (< 1000 rows)** | `cart`, `rf`, `gmm`, `kde` | Don't overfit, fast |
+| **Large datasets (> 100k rows)** | `lgbm`, `xgboost`, `ctgan` | Scalable |
+| **Preserve correlations** | `ctgan`, `rtvae` | Capture feature relationships |
 | **Class imbalance** | `smote`, `adasyn` | Designed for oversampling |
 | **Fast prototyping** | `resample`, `cart` | Instant results |
-
-| **Numeric-only data** | `gmm`, `diffusion` | Simple distributions |
+| **Numeric-only data** | `gmm`, `kde`, `diffusion` | Simple distributions |
+| **Differential privacy** | `dpgan`, `pategan` | Formal DP guarantees |
+| **Privatize existing data** | `privatize()` | Laplace/Gaussian/RandomResponse |
+| **Custom model** | `generate_custom()` | Any sklearn/synthcity/copulae model |
+| **Single-cell (labeled)** | `scanvi` | Semi-supervised, label-conditioned |
+| **Semantic tabular** | `great` | LLM-based, best for complex correlations |
+| **Synthetic data with drift** | `conditional_drift`, `windowed_copula`, `hmm` | Native drift in generated data |
 
 ### Single-Cell Methods Details
 
@@ -381,6 +539,34 @@ synthetic = gen.generate(
 > [!TIP]
 > **AnnData Support:** When passing `AnnData`, the object is used directly without conversion, preserving the original structure. The output is always a `pd.DataFrame` containing both the gene expression and the observations metadata.
 
+#### scANVI (Semi-supervised Single-Cell Inference)
+
+scANVI extends scVI by conditioning generation on cell type labels (semi-supervised). It requires `target_col` to identify the label column.
+
+**When to use scANVI:**
+- You have annotated cell type labels and want label-conditioned generation.
+- You need to generate specific proportions of each cell type (`custom_distributions`).
+- You want better biological separability between classes than unsupervised scVI.
+
+```python
+synthetic = gen.generate(
+    data=adata,              # AnnData or DataFrame
+    n_samples=2000,
+    method="scanvi",
+    target_col="cell_type",  # Required: column with cell type labels
+    epochs=200,
+    n_latent=30,
+    custom_distributions={"cell_type": {"T cell": 0.5, "B cell": 0.3, "NK cell": 0.2}}
+)
+```
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `target_col` | **required** | Column name with cell type labels |
+| `epochs` | 200 | Training epochs for the base scVI model |
+| `n_latent` | 30 | Latent space dimensionality |
+| `n_layers` | 1 | Number of encoder/decoder layers |
+| `custom_distributions` | `None` | Per-class proportions for generation |
 
 ---
 
@@ -389,6 +575,13 @@ synthetic = gen.generate(
 ## Advanced Features
 
 ### Custom Distributions
+
+You can force a specific marginal distribution for any categorical column using `custom_distributions`. The exact behavior depends on the chosen synthesis method:
+
+- **CTGAN / Deep Learning (Conditional):** Performs *real conditional generation*. It generates exact proportional counts per class directly from the synthesized model, without relying on post-generation resampling.
+- **SMOTE / ADASYN:** Translates the requested distribution into absolute counts and applies them natively as the `sampling_strategy` in `imbalanced-learn`.
+- **GMM, TVAE, Copula, BN, scVI, DDPM:** Uses the internal `_apply_postprocess_distribution` method. After generating bulk synthetic data, it intelligently resamples rows to fulfill the requested class proportions while preserving column correlations.
+- **Time Series (TimeGAN, TimeVAE, fflows):** `custom_distributions` and `balance` are not applicable to temporal sequences. A warning will be emitted and the argument will be ignored.
 
 ```python
 synthetic = gen.generate(
@@ -488,6 +681,102 @@ new_samples = loaded_gen.generate(n_samples=500)
 ```
 
 > **Warning:** When generating from a loaded model, you **must not** pass `data` to `generate()`, but you **must** pass `n_samples`.
+
+> **Note:** scVI and scANVI models use a directory-based save format internally. These are packaged inside the zip file transparently — save/load works identically to all other methods.
+
+---
+
+## Privacy Methods
+
+### `privatize()` — Apply Differential Privacy to Existing Data
+
+Applies differential privacy mechanisms directly to a real DataFrame, returning a privatized version. Unlike `dpgan`/`pategan` which train a generative model, `privatize` is a direct transformation of the input data.
+
+- **Numeric columns:** Laplace or Gaussian noise is added.
+- **Categorical columns:** Randomized Response is applied.
+
+```python
+# Laplace mechanism (default)
+private_df = gen.privatize(df, epsilon=1.0)
+
+# Gaussian mechanism
+private_df = gen.privatize(df, epsilon=1.0, mechanism="gaussian", delta=1e-5)
+
+# Custom randomized response probability
+private_df = gen.privatize(df, epsilon=0.5, categorical_p=0.8)
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `data` | DataFrame | - | Input DataFrame to privatize |
+| `epsilon` | float | `1.0` | Privacy budget ε. Lower = more private. |
+| `delta` | float | `None` | Required for Gaussian mechanism. |
+| `numeric_sensitivity` | float | `1.0` | Global sensitivity for numeric columns. |
+| `mechanism` | str | `'laplace'` | `'laplace'` or `'gaussian'` for numeric columns. |
+| `categorical_p` | float | `None` | Probability of keeping true category. If None, derived from ε. |
+
+---
+
+## Custom Models: `generate_custom()` and `CustomPluginAdapter`
+
+### `generate_custom()` — Use Any External Model
+
+Wraps any external model (sklearn, synthcity, copulae, etc.) for use with `RealGenerator`. The adapter auto-detects the model's interface (`fit`/`train`, `generate`/`sample`/`random`) using duck typing. You can override with explicit lambdas for full control.
+
+```python
+from sklearn.neighbors import KernelDensity
+
+kde_model = KernelDensity(kernel='gaussian', bandwidth=0.5)
+
+synthetic_df = gen.generate_custom(
+    data=df,
+    model=kde_model,
+    n_samples=500,
+    # Optional: explicit fit/generate functions if auto-detection fails
+    fit_fn=lambda m, data: m.fit(data.values),
+    generate_fn=lambda m, n: pd.DataFrame(m.sample(n), columns=df.columns),
+    method_name="my_kde",
+)
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `data` | DataFrame | - | Training data |
+| `model` | any | - | Any model object with fit/train and generate/sample/random |
+| `n_samples` | int | - | Number of synthetic samples to generate |
+| `fit_fn` | callable | `None` | `lambda model, data: ...` — override auto-detected fit method |
+| `generate_fn` | callable | `None` | `lambda model, n: ...` — override auto-detected generate method |
+| `postprocess_fn` | callable | `None` | Post-process generated DataFrame |
+| `method_name` | str | `"custom"` | Label for logging and metadata |
+| `columns` | List[str] | `None` | Column names (defaults to `data.columns`) |
+
+### `CustomPluginAdapter` — Standalone Adapter
+
+You can also use `CustomPluginAdapter` directly for more advanced scenarios:
+
+```python
+from calm_data_generator.generators.tabular.CustomPluginAdapter import CustomPluginAdapter
+from synthcity.plugins import Plugins
+
+# Use any Synthcity plugin
+plugin = Plugins().get("adsgan")
+
+adapter = CustomPluginAdapter(
+    model=plugin,
+    method_name="adsgan",
+    columns=df.columns.tolist()
+)
+adapter.fit(df)
+synthetic_df = adapter.generate(n_samples=500)
+```
+
+**Auto-detected interfaces (in priority order):**
+
+| Interface | Detected when model has | Return format |
+|-----------|------------------------|---------------|
+| Synthcity | `.generate()` | `.dataframe()` called automatically |
+| sklearn-like | `.sample()` | Wrapped in `pd.DataFrame` |
+| Copulae-like | `.random()` | Wrapped in `pd.DataFrame` |
 
 ---
 
@@ -592,15 +881,15 @@ If your data is logically fragmented (e.g., by Stores, Countries, Patients) and 
 
 ### 6. Handling Imbalanced Data
 If your target column has minority classes that you want to amplify:
-*   **Automatic Balancing:** Use `balance_target=True`. The generator applies internal oversampling (SMOTE/RandomOverSampler) so the model learns equally from all classes.
+*   **Automatic Balancing:** Use `balance=True`. The generator applies internal oversampling (SMOTE/RandomOverSampler) so the model learns equally from all classes.
     ```python
-    gen.generate(data, target_col="fraud", balance_target=True, method="cart")
+    gen.generate(data, target_col="fraud", balance=True, method="cart")
     ```
 *   **Custom Distribution:** If you want a specific ratio (e.g., 70% Class A, 30% Class B):
     ```python
     gen.generate(data, target_col="status", custom_distributions={"status": {"Low": 0.7, "High": 0.3}})
     ```
-    *Note: `balance_target=True` is a shortcut for `custom_distributions={"col": "balanced"}`. For extreme imbalances, Deep Learning methods like `method="ctgan"` usually provide better stability than tree-based methods.*
+    *Note: `balance=True` is a shortcut for `custom_distributions={"col": "balanced"}`. For extreme imbalances, Deep Learning methods like `method="ctgan"` usually provide better stability than tree-based methods.*
 
 ---
 
@@ -1061,7 +1350,7 @@ synth = gen.generate(
 
 ---
 
-## v1.2.0 New Features
+## v1.2.0 Features
 
 ### Latent Space Differentiation (`differentiation_factor`)
 

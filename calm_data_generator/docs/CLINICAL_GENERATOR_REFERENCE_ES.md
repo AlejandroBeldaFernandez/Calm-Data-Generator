@@ -1,8 +1,11 @@
 # ClinicalDataGenerator - Referencia Completa
 
-**Ubicación:** `calm_data_generator.generators.clinical.ClinicalDataGenerator`
+**Ubicacion:** `calm_data_generator.generators.clinical.ClinicalDataGenerator`
+**Hereda de:** `ComplexGenerator` → `BaseGenerator`
 
-El `ClinicalDataGenerator` es un simulador de alta fidelidad para datasets sanitarios multimodales. Orquestra la generación de:
+El `ClinicalDataGenerator` es un simulador de alta fidelidad para datasets sanitarios multimodales. Utiliza los tres motores matematicos de `ComplexGenerator` (Copula Gaussiana incondicional, Copula Gaussiana condicional, y efectos estocasticos) para generar datos correlacionados y biologicamente realistas. Consulta [COMPLEX_GENERATOR_REFERENCE_ES.md](COMPLEX_GENERATOR_REFERENCE_ES.md) para detalles de los motores.
+
+Orquestra la generacion de:
 1.  **Demografía de Pacientes**: Edad, género, IMC, etc., con interdependencias.
 2.  **Datos Ómicos**: Expresión génica (RNA-Seq/Microarray) y proteínas, correlacionados con la demografía.
 3.  **Registros Longitudinales**: Trayectorias de visitas múltiples.
@@ -136,15 +139,19 @@ El `disease_effects_config` permite un control preciso sobre señales biológica
 
 ### Tipos de Efecto Soportados
 
-| Tipo de Efecto | Fórmula | Descripción |
+Todos los efectos se aplican via `ComplexGenerator.apply_stochastic_effects`. Cada entidad (paciente) recibe un offset aleatorio independiente muestreado de la distribucion de `effect_value`.
+
+| Tipo de Efecto | Formula | Descripcion |
 |----------------|---------|-------------|
-| `fold_change` | $x_{new} = x \cdot value$ | Escalado multiplicativo (ej. sobreexpresión) |
-| `additive_shift` | $x_{new} = x + value$ | Añade señal de fondo constante |
-| `power_transform` | $x_{new} = x^{value}$ | Distorsión no lineal |
-| `log_transform` | $x_{new} = \ln(x + \epsilon)$ | Normalización logarítmica |
-| `variance_scale` | $x_{new} = \mu + (x-\mu)\cdot value$ | Aumenta/disminuye dispersión |
-| `polynomial_transform`| $x_{new} = P(x)$ | Mapeo polinómico (coeffs en value) |
-| `sigmoid_transform` | $x_{new} = \frac{1}{1 + e^{-k(x-x_0)}}$ | Saturación en curva S |
+| `fold_change` | $x_{new} = x \cdot value$ | Escalado multiplicativo (ej. sobreexpresion) |
+| `additive_shift` | $x_{new} = x + value$ | Desplazamiento aditivo directo |
+| `power_transform` | $x_{new} = x^{value}$ | Distorsion no lineal |
+| `log_transform` | $x_{new} = \ln(x + \epsilon)$ | Normalizacion logaritmica |
+| `variance_scale` | $x_{new} = \mu + (x-\mu)\cdot value$ | Aumenta/disminuye dispersion |
+| `polynomial_transform`| $x_{new} = P(x)$ | Mapeo polinomial (coeficientes en value) |
+| `sigmoid_transform` | $x_{new} = \frac{1}{1 + e^{-k(x-x_0)}}$ | Saturacion en curva S |
+
+> **Nota para datos de proteinas:** Usa `fold_change` para distribuciones lognormales de proteinas. El uso de `additive_shift` en proteinas emite un aviso de logger porque ahora aplica un desplazamiento aditivo directo (no el desplazamiento historico en espacio logaritmico). Usa `simple_additive_shift` como alias explicito si quieres un desplazamiento aditivo directo sin el aviso.
 
 ---
 

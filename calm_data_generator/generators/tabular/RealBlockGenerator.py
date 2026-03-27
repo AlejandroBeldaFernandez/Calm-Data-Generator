@@ -28,7 +28,7 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 from .RealGenerator import RealGenerator
-from .QualityReporter import QualityReporter
+from calm_data_generator.reports.QualityReporter import QualityReporter
 from calm_data_generator.generators.configs import DriftConfig, ReportConfig
 
 
@@ -59,7 +59,7 @@ class RealBlockGenerator(RealGenerator):
         self.logger = logging.getLogger(self.__class__.__name__)
         self.logger.setLevel(logging.INFO)
 
-        self.reporter = QualityReporter()
+       
         self.logger.info("RealBlockGenerator initialized.")
 
     # --------------------------------------------------------------------------- #
@@ -425,7 +425,6 @@ class RealBlockGenerator(RealGenerator):
 
             # Numeric stats
             numeric_cols = original_block.select_dtypes(include=[np.number]).columns
-            numeric_cols = [c for c in numeric_cols if c != block_column]
             if numeric_cols:
                 stats["original_numeric_means"] = (
                     original_block[numeric_cols].mean().to_dict()

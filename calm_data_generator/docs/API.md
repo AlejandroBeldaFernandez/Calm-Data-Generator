@@ -26,11 +26,31 @@ from calm_data_generator.generators.tabular import RealGenerator, QualityReporte
 | `scvi` | scVI (Single-Cell VI) |
 | `ddpm` | Tabular Diffusion (DDPM) |
 
-**New Parameters (v1.2.0):**
+**New Parameters (v1.2.0+):**
 - `differentiation_factor` (float): Enhances class separation in latent space (TVAE/scVI only).
 - `clipping_mode` (str): `'strict'`, `'permissive'`, or `'none'` for handling output ranges.
 - `use_latent_sampling` (bool): For scVI, sample from real data latent space.
 
+**Advanced Validation & Processing:**
+- `_apply_postprocess_distribution(self, synthetic_df, class_counts, target_col, ...)`: Intelligently resamples rows in a synthetic DataFrame to meet target class distributions while preserving correlations. Emits warnings if classes are missing. Used automatically by many models when `custom_distributions` is set.
+
+---
+
+### generators.complex - Abstract Mathematical Layer
+
+```python
+from calm_data_generator.generators.complex.ComplexGenerator import ComplexGenerator
+```
+
+**ComplexGenerator** - Abstract base for any generator that needs correlated or conditional synthesis. Inherit from this instead of `BaseGenerator` when you need the three built-in engines:
+
+| Engine | Method | Description |
+|--------|--------|-------------|
+| Gaussian Copula (unconditional) | `_generate_correlated_module(n, marginals, sigma)` | Generates correlated samples from arbitrary marginals |
+| Gaussian Copula (conditional) | `_generate_conditional_data(n, cond_data, cond_marginals, tgt_marginals, cov)` | Generates target variables conditioned on observed data |
+| Stochastic effects | `apply_stochastic_effects(df, entity_ids, effect_config)` | Applies one of 7 effect types in-place |
+
+See [COMPLEX_GENERATOR_REFERENCE.md](COMPLEX_GENERATOR_REFERENCE.md) for full documentation.
 
 ---
 
@@ -39,6 +59,8 @@ from calm_data_generator.generators.tabular import RealGenerator, QualityReporte
 ```python
 from calm_data_generator.generators.clinical import ClinicalDataGenerator
 ```
+
+`ClinicalDataGenerator` inherits from `ComplexGenerator` and uses all three engines internally.
 
 **Methods:**
 - `generate()` - Generate demographics + omics
@@ -81,6 +103,32 @@ from calm_data_generator.generators.drift import DriftInjector
 - `inject_correlation_matrix_drift()`
 - `inject_binary_probabilistic_drift()`
 - `inject_multiple_types_of_drift()`
+- `inject_functional_drift()` — drift magnitude as f(driver_col) per row (Pilar 5)
+- `inject_causal_cascade()` — DAG-based non-linear causal propagation (Pilar 5)
+
+---
+
+### generators.dynamics - Scenario Evolution & Causal Engine
+
+```python
+from calm_data_generator.generators.dynamics import ScenarioInjector
+from calm_data_generator.generators.dynamics.CausalEngine import CausalEngine
+```
+
+**ScenarioInjector** — evolves features over time. Evolution types: `linear`, `exponential_growth`, `decay`, `seasonal`, `step`, `noise`, `random_walk`, `driven_by` (Pilar 5).
+
+**CausalEngine** — DAG-based causal cascade propagation. Define parent→child relationships with transfer functions and propagate perturbations through the graph. See [CAUSAL_ENGINE_REFERENCE.md](CAUSAL_ENGINE_REFERENCE.md).
+
+---
+
+### generators.utils - Shared Utilities
+
+```python
+from calm_data_generator.generators.utils.propagation import propagate_numeric_drift, apply_func
+```
+
+- `propagate_numeric_drift(df, rows, driver_col, delta, correlations)` — correlation-based delta propagation used by DriftInjector and ScenarioInjector
+- `apply_func(func_name, params, x)` — evaluate named transfer functions (`linear`, `exponential`, `power`, `polynomial`, callable)
 
 ---
 

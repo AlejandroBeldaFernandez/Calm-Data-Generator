@@ -198,6 +198,68 @@ drifted_df = injector.inject_categorical_frequency_drift(
 
 ---
 
+## Pilar 5: Drift Funcional y Cascadas Causales
+
+### `inject_functional_drift()` — Magnitud determinada por otra columna
+
+Inyecta drift cuya magnitud varía por fila en función del valor actual de `driver_col`.
+
+Caso de uso: *el ruido de un sensor escala exponencialmente con la temperatura actual.*
+
+```python
+df_result = injector.inject_functional_drift(
+    df,
+    target_cols=["sensor_reading"],
+    driver_col="temperature",
+    magnitude_func="exponential",    # "linear"|"exponential"|"power"|"polynomial"|callable
+    magnitude_params={"scale": 0.001, "rate": 0.1},
+    drift_type="additive",           # "additive" o "multiplicative"
+    # Selección de filas opcional (mismo sistema que el resto de métodos):
+    conditions=[{"column": "temperature", "operator": ">", "value": 30}],
+)
+```
+
+| Parámetro | Tipo | Descripción |
+|-----------|------|-------------|
+| `target_cols` | list[str] | Columnas a perturbar |
+| `driver_col` | str | Columna cuyos valores determinan la magnitud por fila |
+| `magnitude_func` | str o callable | Función de transferencia: `"linear"`, `"exponential"`, `"power"`, `"polynomial"`, o callable |
+| `magnitude_params` | dict | Parámetros para `magnitude_func` (ej. `{"scale": 0.01, "rate": 0.2}`) |
+| `drift_type` | str | `"additive"` (x += magnitud) o `"multiplicative"` (x *= magnitud) |
+
+### `inject_causal_cascade()` — Propagación basada en DAG
+
+Propaga una perturbación desde una variable disparadora a través de un DAG causal definido por el usuario.
+
+Caso de uso: *un pico de temperatura aumenta la presión, que degrada exponencialmente la fiabilidad del sensor.*
+
+```python
+dag = {
+    "temperature": [],
+    "pressure":    [{"parent": "temperature", "func": "linear",      "params": {"slope": 1.2}}],
+    "sensor_fail": [{"parent": "pressure",    "func": "exponential", "params": {"scale": 0.001, "rate": 0.3}}],
+}
+
+df_result = injector.inject_causal_cascade(
+    df,
+    dag_config=dag,
+    trigger_col="temperature",
+    trigger_delta=5.0,           # escalar o array
+    # Opcional: time_start, conditions, etc.
+)
+```
+
+| Parámetro | Tipo | Descripción |
+|-----------|------|-------------|
+| `dag_config` | dict | DAG causal (ver [CAUSAL_ENGINE_REFERENCE_ES.md](CAUSAL_ENGINE_REFERENCE_ES.md)) |
+| `trigger_col` | str | Variable raíz que recibe la perturbación |
+| `trigger_delta` | float o np.ndarray | Magnitud de la perturbación inicial |
+
+Funciones de transferencia soportadas: `"linear"`, `"exponential"`, `"power"`, `"polynomial"`, callable.
+La propagación es diferencial: `delta_hijo = f(v_padre + delta) - f(v_padre)`.
+
+---
+
 ## 🌟 Escenarios del Mundo Real
 
 ### Caso 1: Degradación de Sensor (Incremental + Ruido)

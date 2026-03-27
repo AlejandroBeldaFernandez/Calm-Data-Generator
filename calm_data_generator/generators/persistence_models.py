@@ -2,37 +2,6 @@ try:
     import torch
     import torch.nn as nn
 
-    class SimpleDenoiser(nn.Module):
-        def __init__(self, dim):
-            super().__init__()
-            self.net = nn.Sequential(
-                nn.Linear(dim + 1, 128),  # +1 for timestep
-                nn.ReLU(),
-                nn.Linear(128, 256),
-                nn.ReLU(),
-                nn.Linear(256, 128),
-                nn.ReLU(),
-                nn.Linear(128, dim),
-            )
-
-        def forward(self, x, t):
-            # Normalize timestep (assuming steps=1000 roughly or passed in?)
-            # In the original code it was t / steps. Steps was local.
-            # We can change it to expect t in [0,1] or handle steps dynamic.
-            # In original code: t_emb = t.unsqueeze(-1) / steps
-            # To be safe, we should pass t normalized or know steps.
-            # Let's assume t is raw index and we normalize by 1000 if not provided?
-            # Or better, let's just use the value passed.
-            # Wait, `steps` was a closure variable in original.
-            # We need to pass `steps` to __init__?
-            # Or assume t is already normalized when passed?
-            # Original: pred_noise = model(noisy, t.float())
-            # inside: t_emb = t.unsqueeze(-1) / steps
-            # We need to change __init__ to accept steps or method signature.
-            # For simplicity let's stick to the previous logic but maybe make steps an attribute?
-            t_emb = t.unsqueeze(-1)  # Placeholder, see note
-            return self.net(torch.cat([x, t_emb], dim=-1))
-
     # Redefine properly for picklability
     class SimpleDenoiser(nn.Module):
         def __init__(self, dim, steps=1000):
@@ -103,10 +72,10 @@ try:
                 # Apply encoding if model is not LGBM (heuristic)
                 # We need to check if the model object expects encoded inputs.
                 # In _synthesize_fcs_generic, we checked "LGBM" in class name.
-                is_lgbm = "LGBM" in model.__class__.__name__
+                is_native_cat = any(name in model.__class__.__name__ for name in ("LGBM", "XGB"))
 
                 Xs_encoded = Xs.copy()
-                if not is_lgbm:
+                if not is_native_cat:
                     for c in Xs_encoded.select_dtypes(include=["category"]).columns:
                         if c in self.encoding_info:
                             # Force categories alignment

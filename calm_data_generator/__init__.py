@@ -3,7 +3,9 @@
 from calm_data_generator.generators.tabular import RealGenerator, QualityReporter
 from calm_data_generator.generators.clinical import ClinicalDataGenerator
 from calm_data_generator.generators.drift import DriftInjector
-from calm_data_generator.generators.dynamics import ScenarioInjector
+from calm_data_generator.generators.dynamics import ScenarioInjector, CausalEngine
+from calm_data_generator.generators.complex import ComplexGenerator
+from calm_data_generator import presets
 
 # Optional imports that may fail
 try:
@@ -11,13 +13,19 @@ try:
 except ImportError:
     StreamGenerator = None
 
-__version__ = "1.2.0"
+__version__ = "2.0.0"
 
 __all__ = [
+    # Generators
     "RealGenerator",
     "QualityReporter",
     "ClinicalDataGenerator",
+    "ComplexGenerator",
     "StreamGenerator",
+    # Drift & dynamics
     "DriftInjector",
     "ScenarioInjector",
+    "CausalEngine",
+    # Presets
+    "presets",
 ]

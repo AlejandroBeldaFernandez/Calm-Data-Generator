@@ -1,0 +1,70 @@
+# Changelog
+
+Todos los cambios notables de CALM-Data-Generator están documentados aquí.
+
+---
+
+## [2.0.0] — 2026-03-27
+
+### Nuevas Funcionalidades
+
+#### ComplexGenerator — Capa Matemática Abstracta
+- Nueva clase abstracta `ComplexGenerator(BaseGenerator)` como capa intermedia entre `BaseGenerator` y los generadores de dominio.
+- Proporciona tres motores matemáticos reutilizables sin duplicar código:
+  - `_generate_correlated_module(n, marginals, sigma)` — Cópula Gaussiana (incondicional) con reparación de matrices PSD vía `scipy.linalg.eigh`.
+  - `_generate_conditional_data(n, cond_data, cond_marginals, tgt_marginals, cov)` — Cópula Gaussiana condicional con RQR para marginales discretas.
+  - `apply_stochastic_effects(df, entity_ids, effect_config)` — 7 tipos de efectos estocásticos + alias `simple_additive_shift`.
+- `ClinicalDataGenerator` ahora hereda de `ComplexGenerator` en lugar de `BaseGenerator`.
+
+#### Dinámica Causal (DriftInjector + ScenarioInjector)
+- **`CausalEngine`** — propagación causal basada en DAG (`generators/dynamics/CausalEngine.py`):
+  - Orden topológico via algoritmo de Kahn con detección de ciclos.
+  - Propagación diferencial: `delta_hijo = f(v_padre + delta) - f(v_padre)`.
+  - Funciones de transferencia: `linear`, `exponential`, `power`, `polynomial`, o cualquier callable.
+- **`DriftInjector.inject_functional_drift()`** — magnitud del drift por fila = f(valor actual de `driver_col`). Soporta modo aditivo y multiplicativo.
+- **`DriftInjector.inject_causal_cascade()`** — aplica una cascada `CausalEngine` con el sistema de selección de filas e informes del `DriftInjector`.
+- **`ScenarioInjector` tipo de evolución `driven_by`** — delta de una feature por fila = f(valor de otra columna). Desacoplado del índice temporal.
+- **`generators/utils/propagation.py`** — módulo de utilidades compartidas:
+  - `propagate_numeric_drift(df, rows, driver_col, delta_driver, correlations)` — extraído de `DriftInjector` y `ScenarioInjector` para eliminar duplicación.
+  - `apply_func(func_name, params, x)` — evalúa funciones de transferencia por nombre sobre arrays.
+- **`EvolutionFeatureConfig`** extendido con los campos `driver_col`, `func`, `func_params`.
+
+### Correcciones de Bugs
+
+- **RealGenerator — columnas datetime en CART/RF**: `_synthesize_fcs_generic` ahora convierte columnas datetime a `int64` antes del bucle FCS, corrigiendo errores `DType DateTime64DType cannot be promoted`.
+- **RealGenerator — dispatch del método `bn`**: `elif method == "bayesian_network"` extendido a `elif method in ("bayesian_network", "bn")`, corrigiendo la síntesis que devolvía `None` al usar `method="bn"`.
+- **RealGenerator — API Synthcity en `conditional_drift`**: eliminado el parámetro inválido `cond=` de `syn.generate()` — TVAE/CTGAN son generadores incondicionales y no soportan condicionamiento en inferencia.
+- **RealGenerator — array 1D en `windowed_copula`**: `copula.random(n)` puede devolver un array 1D cuando `n=1`; ahora se redimensiona a 2D antes de `scaler.inverse_transform()`.
+- **`ClinicalDataGenerator` — dos llamadas restantes a `_generate_module_data`**: actualizadas a `_generate_correlated_module` tras la refactorización de ComplexGenerator.
+- **`test_disease_effects_fix.py`**: convertido de script a nivel de módulo a función pytest correcta.
+
+### Tests
+
+- Todos los archivos de test con `unittest.TestCase` convertidos a pytest puro (9 archivos, 41 tests).
+- Nuevo `tests/test_causal_engine.py` — 10 tests cubriendo propagación DAG, detección de ciclos, filas parciales y orden topológico.
+- Nuevo `tests/test_functional_drift.py` — 8 tests cubriendo drift funcional, cascada causal, `driven_by` y `propagate_numeric_drift`.
+- Suite completa: **186 passed, 8 skipped, 0 failed**.
+
+### Documentación
+
+- Nuevo `CAUSAL_ENGINE_REFERENCE.md` / `_ES.md` — referencia completa del DAG con ejemplos de IoT, Finanzas y Clínica.
+- Nuevo `COMPLEX_GENERATOR_REFERENCE.md` / `_ES.md` — referencia de los tres motores matemáticos.
+- Nueva sección `Referencia de Librerías` en `DOCUMENTATION.md` / `_ES.md` — mapea cada método de síntesis a su librería subyacente con enlaces a la documentación oficial.
+- Actualizado `DRIFT_INJECTOR_REFERENCE.md` / `_ES.md` — añadidos `inject_functional_drift` e `inject_causal_cascade`.
+- Actualizado `SCENARIO_INJECTOR_REFERENCE.md` / `_ES.md` — añadido tipo de evolución `driven_by`.
+- Actualizado `API.md` / `API_ES.md` — añadidas secciones `generators.dynamics` (CausalEngine) y `generators.utils`.
+- Actualizado `CLINICAL_GENERATOR_REFERENCE.md` / `_ES.md` — herencia de ComplexGenerator, advertencia `additive_shift` para proteínas.
+- Actualizado `README.md` / `README_ES.md` — "Tecnologías Principales" expandido con tablas completas de librerías y enlaces; añadida sección Evolución de Escenarios.
+- Tutoriales actualizados: `advanced_drifts.py` y `scenario_injector.py` incluyen ejemplos de `inject_functional_drift`, `inject_causal_cascade` y `driven_by`.
+
+---
+
+## [1.2.0] — Versión anterior
+
+- Parámetro `differentiation_factor` para TVAE y scVI (aumenta la separabilidad de clases en el espacio latente).
+- Parámetro `clipping_mode`: `'strict'`, `'permissive'` o `'none'`.
+- `use_latent_sampling` para scVI.
+- `_apply_postprocess_distribution` para remuestreo inteligente respetando la distribución de clases.
+- Método de síntesis Windowed Copula.
+- Método de síntesis Conditional Drift.
+- Métodos de Privacidad Diferencial: DPGAN, PATEGAN.

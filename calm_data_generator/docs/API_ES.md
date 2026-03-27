@@ -27,24 +27,47 @@ from calm_data_generator.generators.tabular import RealGenerator, QualityReporte
 | `fflows` | FourierFlows (series periódicas) |
 | `scvi` | scVI (Single-Cell VI) |
 
-**Nuevos Parámetros (v1.2.0):**
+**Nuevos Parámetros (v1.2.0+):**
 - `differentiation_factor` (float): Aumenta la separación de clases en el espacio latente (solo TVAE/scVI).
 - `clipping_mode` (str): `'strict'`, `'permissive'`, o `'none'` para manejar los rangos de salida.
 - `use_latent_sampling` (bool): Para scVI, muestrea desde el espacio latente de datos reales.
+
+**Validación y Procesamiento Avanzado:**
+- `_apply_postprocess_distribution(self, synthetic_df, class_counts, target_col, ...)`: Remuestrea filas inteligentemente en un DataFrame sintético para cumplir la distribución de clases objetivo preservando las correlaciones. Emite warnings si faltan clases. Usado automáticamente por muchos modelos cuando se define `custom_distributions`.
 
 
 
 
 ---
 
-### generators.clinical - Datos Clínicos
+### generators.complex - Capa Matematica Abstracta
+
+```python
+from calm_data_generator.generators.complex.ComplexGenerator import ComplexGenerator
+```
+
+**ComplexGenerator** - Base abstracta para cualquier generador que necesite sintesis correlacionada o condicional. Hereda de esta clase en lugar de `BaseGenerator` cuando necesitas los tres motores integrados:
+
+| Motor | Metodo | Descripcion |
+|-------|--------|-------------|
+| Copula Gaussiana (incondicional) | `_generate_correlated_module(n, marginals, sigma)` | Genera muestras correlacionadas con marginales arbitrarias |
+| Copula Gaussiana (condicional) | `_generate_conditional_data(n, cond_data, cond_marginals, tgt_marginals, cov)` | Genera variables objetivo condicionadas a datos observados |
+| Efectos estocasticos | `apply_stochastic_effects(df, entity_ids, effect_config)` | Aplica uno de 7 tipos de efecto en-lugar |
+
+Consulta [COMPLEX_GENERATOR_REFERENCE_ES.md](COMPLEX_GENERATOR_REFERENCE_ES.md) para documentacion completa.
+
+---
+
+### generators.clinical - Datos Clinicos
 
 ```python
 from calm_data_generator.generators.clinical import ClinicalDataGenerator
 ```
 
-**Métodos:**
-- `generate()` - Genera demografía + ómicas
+`ClinicalDataGenerator` hereda de `ComplexGenerator` y usa los tres motores internamente.
+
+**Metodos:**
+- `generate()` - Genera demografia + omicas
 - `generate_longitudinal_data()` - Datos de paciente multi-visita
 
 ---
@@ -84,19 +107,32 @@ from calm_data_generator.generators.drift import DriftInjector
 - `inject_correlation_matrix_drift()`
 - `inject_binary_probabilistic_drift()`
 - `inject_multiple_types_of_drift()`
+- `inject_functional_drift()` — magnitud del drift como f(driver_col) por fila (Pilar 5)
+- `inject_causal_cascade()` — propagación causal no lineal basada en DAG (Pilar 5)
 
 ---
 
-### generators.dynamics - Evolución de Escenarios
+### generators.dynamics - Evolución de Escenarios y Motor Causal
 
 ```python
 from calm_data_generator.generators.dynamics import ScenarioInjector
+from calm_data_generator.generators.dynamics.CausalEngine import CausalEngine
 ```
 
-**Métodos:**
-- `evolve_features()` - Aplica tendencias/ciclos
-- `construct_target()` - Crea variables objetivo
-- `project_to_future_period()` - Datos futuros
+**ScenarioInjector** — evoluciona features en el tiempo. Tipos de evolución: `linear`, `exponential_growth`, `decay`, `seasonal`, `step`, `noise`, `random_walk`, `driven_by` (Pilar 5).
+
+**CausalEngine** — propagación causal basada en DAG. Define relaciones padre→hijo con funciones de transferencia y propaga perturbaciones por el grafo. Ver [CAUSAL_ENGINE_REFERENCE_ES.md](CAUSAL_ENGINE_REFERENCE_ES.md).
+
+---
+
+### generators.utils - Utilidades Compartidas
+
+```python
+from calm_data_generator.generators.utils.propagation import propagate_numeric_drift, apply_func
+```
+
+- `propagate_numeric_drift(df, rows, driver_col, delta, correlations)` — propagación de delta basada en correlaciones, usado por DriftInjector y ScenarioInjector
+- `apply_func(func_name, params, x)` — evalúa funciones de transferencia por nombre (`linear`, `exponential`, `power`, `polynomial`, callable)
 
 ---
 
