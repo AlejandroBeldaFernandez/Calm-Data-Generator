@@ -73,20 +73,25 @@ class RealGenerator(BaseGenerator):
     ):
         # Handle Synthcity loggers (uses loguru)
         self.training_history = {}
+        self._loguru_handler_id = None # Track our specific sink
         try:
-            import synthcity.logger as sclog
             from loguru import logger as loguru_logger
+            import synthcity.logger as sclog
             import re
             
-            sclog.remove() # Remove default file sink
-            loguru_logger.remove() # Ensure all default sinks are removed
-            
-            if verbose_training:
-                # Add stdout sink for verbose training
-                loguru_logger.add(sys.stdout, level="DEBUG")
+            # Note: We avoid calling loguru_logger.remove() globally to not break other libs
+            # We only remove our own if it existed (e.g. from a prior failed __init__)
+            if hasattr(self, "_loguru_handler_id") and self._loguru_handler_id is not None:
+                try:
+                    loguru_logger.remove(self._loguru_handler_id)
+                except Exception:
+                    pass
 
-            # Capture training losses from Synthcity (TVAE, etc.)
             def capture_synthcity_metrics(message):
+                # Only capture if THIS instance is currently the one training
+                # We use a simple cross-check flag
+                if not getattr(self, "_is_training_active", False):
+                    return
                 # Synthcity TVAE/VAE loss looks like: "[epoch/max_iter] Loss: 1.234"
                 loss_match = re.search(r"Loss: ([\d\.]+)", message)
                 if loss_match:
@@ -94,7 +99,8 @@ class RealGenerator(BaseGenerator):
                         self.training_history["loss_evolution"] = []
                     self.training_history["loss_evolution"].append(float(loss_match.group(1)))
             
-            loguru_logger.add(capture_synthcity_metrics, level="DEBUG")
+            # We add a sink that belongs to this specific instance
+            self._loguru_handler_id = loguru_logger.add(capture_synthcity_metrics, level="DEBUG")
         except ImportError:
             pass
 
@@ -4139,6 +4145,12 @@ class RealGenerator(BaseGenerator):
         report_config: Optional[Union[ReportConfig, Dict]] = None,
         **kwargs,
     ) -> Optional[pd.DataFrame]:
+        # BUGFIX: Reset history and active state at the start of each generation
+        self.training_history = {}
+        self._is_training_active = True
+        
+        # Ensure reporter is fresh and respects the current minimal mode
+        self.reporter = QualityReporter(minimal=self.minimal_report)
         """
         The main public method to generate synthetic data.
 
@@ -4753,10 +4765,12 @@ class RealGenerator(BaseGenerator):
                     self.logger.error(f"Failed to save synthetic dataset: {e}")
 
             self.logger.debug(f"Returning synth for method '{method}'.")
+            self._is_training_active = False # Release log capturing
             return synth
         else:
             self.logger.debug(
                 f"Synthesis method '{method}' failed to generate data (synth is None)."
             )
             self.logger.error(f"Synthesis method '{method}' failed to generate data.")
+            self._is_training_active = False
             return None
