@@ -103,6 +103,9 @@ def show_tutorial(number):
 
 def run_tutorial(number):
     """Run a specific tutorial."""
+    import subprocess
+    import sys
+
     tutorials_dir = get_tutorials_dir()
     tutorials = sorted(tutorials_dir.glob("*.py"))
 
@@ -114,15 +117,21 @@ def run_tutorial(number):
         idx = int(number) - 1
         if 0 <= idx < len(tutorials):
             tutorial = tutorials[idx]
-            print(f"\n🚀 Running: {tutorial.name}")
+            print(f"\n Running: {tutorial.name}")
             print("=" * 60)
-            exec(open(tutorial).read())
+            # Run in a subprocess to keep the tutorial isolated from this process
+            result = subprocess.run(
+                [sys.executable, str(tutorial)],
+                check=False,
+            )
+            if result.returncode != 0:
+                print(f"Tutorial exited with code {result.returncode}")
         else:
-            print(f"❌ Invalid tutorial number. Choose 1-{len(tutorials)}")
+            print(f"Invalid tutorial number. Choose 1-{len(tutorials)}")
     except ValueError:
-        print("❌ Please provide a tutorial number (e.g., 1, 2, 3)")
+        print("Please provide a tutorial number (e.g., 1, 2, 3)")
     except Exception as e:
-        print(f"❌ Error running tutorial: {e}")
+        print(f"Error running tutorial: {e}")
 
 
 def show_path():

@@ -493,7 +493,8 @@ class Visualizer:
                         "severity": severity,
                         "severity_color": severity_color,
                     }
-                except Exception:
+                except Exception as e:
+                    logger.warning(f"Could not compute drift metrics for column '{col}'; using safe defaults. Reason: {e}")
                     metrics[col] = {
                         "js_div": 0,
                         "ks_stat": 0,
@@ -516,7 +517,8 @@ class Visualizer:
                     if len(drifted_df) > 0
                     else 0
                 )
-            except Exception:
+            except Exception as e:
+                logger.warning(f"Could not compute cross-duplicate percentage; defaulting to 0. Reason: {e}")
                 cross_dup_pct = 0
 
             # Sort by JS divergence

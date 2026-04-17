@@ -552,16 +552,17 @@ class DriftInjector:
         if len(idxs) == 0:
             return s
 
-        # for each row to change, choose a different category
-        current = s.loc[idxs].to_numpy()
-        new_vals = []
-        for cur in current:
-            choices = [u for u in uniques if u != cur]
+        # for each row to change, choose a different category (vectorized by value group)
+        current = s.loc[idxs]
+        result_vals = current.copy()
+        for uval in uniques:
+            sub_idx = current.index[current == uval]
+            if len(sub_idx) == 0:
+                continue
+            choices = [u for u in uniques if u != uval]
             if choices:
-                new_vals.append(rng.choice(choices))
-            else:
-                new_vals.append(cur)
-        s.loc[idxs] = new_vals
+                result_vals.loc[sub_idx] = rng.choice(choices, size=len(sub_idx))
+        s.loc[idxs] = result_vals
         return s
 
     def _validate_feature_op(self, drift_type: str, drift_magnitude: float):
@@ -1755,7 +1756,7 @@ class DriftInjector:
                 try:
                     df_drift = method(**params)
                 except Exception as e:
-                    print(f"Failed to apply {method_name}: {e}")
+                    warnings.warn(f"Failed to apply {method_name}: {e}")
             else:
                 print(f"Method {method_name} not found")
 
@@ -2024,7 +2025,7 @@ class DriftInjector:
         Returns:
             pd.DataFrame: The drifted dataframe.
         """
-        current_df = df.copy()
+        current_df = df
 
         for i, config in enumerate(schedule):
             method_name = "inject_feature_drift"
@@ -2208,8 +2209,7 @@ class DriftInjector:
                     time_col=time_col,
                 )
             except Exception as e:
-                import warnings as _w
-                _w.warn(f"inject_functional_drift: report failed: {e}")
+                warnings.warn(f"inject_functional_drift: report failed: {e}")
 
         return df_result
 
@@ -2320,8 +2320,7 @@ class DriftInjector:
                     time_col=time_col,
                 )
             except Exception as e:
-                import warnings as _w
-                _w.warn(f"inject_causal_cascade: report failed: {e}")
+                warnings.warn(f"inject_causal_cascade: report failed: {e}")
 
         return df_result
 

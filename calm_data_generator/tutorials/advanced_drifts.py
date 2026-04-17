@@ -80,7 +80,8 @@ drifted_conditional = injector.inject_conditional_drift(
     feature_cols=["feature_B"],
     conditions=[{"column": "category", "operator": "==", "value": "X"}],
     drift_type="add_value",
-    drift_magnitude=20.0,  # Add 20 to the value
+    drift_magnitude=20.0,
+    drift_value=20.0,  # Add 20 to the value
     start_index=500,
 )
 

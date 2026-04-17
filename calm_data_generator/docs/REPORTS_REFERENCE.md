@@ -27,6 +27,7 @@ The `calm_data_generator` library includes a suite of reporting tools designed t
 | `constraints_stats` | Dict[str, int] | `None` | Constraint violation statistics |
 | `sequence_config` | Dict | `None` | Configuration for sequence-based analysis |
 | `per_block_external_reports` | bool | `False` | Generate separate reports per block |
+| `use_scgft` | bool | `False` | Enable specialized scGFT single-cell evaluation |
 
 ### Usage Examples
 
@@ -172,6 +173,35 @@ reporter.generate_report(
 )
 ```
 
+
+## Single-Cell Evaluation (scGFT)
+**Module:** `calm_data_generator.reports.QualityReporter`
+
+The library integrates `scGFT_evaluador` to provide specialized validation for single-cell RNA sequencing (scRNA-seq) data. This method uses Graph Fourier Transforms (GFT) to assess if the synthetic data preserves the underlying manifold and biological structure of the original cells.
+
+### Key Features
+- **Manifold Preservation**: Evaluates if the cell-to-cell relationships are maintained.
+- **Cluster/Population Integrity**: Provides metrics on how well synthetic cells represent real populations.
+- **Dashboard Integration**: Generates a dedicated `scgft_report.html` tab in the HTML dashboard.
+
+### Usage
+To activate this evaluation, ensure `scGFT_evaluador`, `scanpy`, and `anndata` are installed, then set `use_scgft=True` in your `ReportConfig`:
+
+```python
+from calm_data_generator.generators.configs import ReportConfig
+
+reporter.generate_comprehensive_report(
+    ...,
+    report_config=ReportConfig(
+        output_dir="./sc_report",
+        use_scgft=True,
+        target_column="cell_type"  # Optional: use to assess population conservation
+    )
+)
+```
+
+> [!IMPORTANT]
+> **Data Format**: This method is specifically designed for single-cell data where columns represent genes and rows represent cells. It is **not recommended** for standard bulk or tabular data.
 
 ## Clinic Reporter (`Clinical`)
 **Module:** `calm_data_generator.generators.clinical.ClinicReporter`

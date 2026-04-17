@@ -283,10 +283,30 @@ class ScenarioInjector:
 
         # 1. Calculate Raw Score
         if isinstance(formula, str):
+            # Validate the formula before calling eval().
+            # Only allow identifiers that are actual column names plus arithmetic
+            # operators and numeric literals — this prevents arbitrary code execution.
+            import re as _re
+            _allowed_pattern = _re.compile(
+                r"^[\w\s\.\+\-\*\/\(\)\,\d\.\>\<\=\!]+$"
+            )
+            if not _allowed_pattern.match(formula):
+                raise ValueError(
+                    f"Formula '{formula}' contains disallowed characters. "
+                    "Only column names, numeric literals, and arithmetic operators "
+                    "(+, -, *, /, parentheses, inequalities) are permitted."
+                )
+            # Additionally verify that every identifier in the formula is an
+            # existing column name or a numeric token, not an arbitrary name.
+            _tokens = _re.findall(r"[A-Za-z_]\w*", formula)
+            _unknown = [t for t in _tokens if t not in df_target.columns]
+            if _unknown:
+                raise ValueError(
+                    f"Formula references unknown identifiers: {_unknown}. "
+                    f"Available columns: {list(df_target.columns)}"
+                )
             try:
-                # Use pandas eval for string formulas
-                # We perform eval in the context of the dataframe
-                raw_score = df_target.eval(formula)
+                raw_score = df_target.eval(formula, engine="python")
             except Exception as e:
                 raise ValueError(f"Error evaluating formula '{formula}': {e}")
         elif callable(formula):

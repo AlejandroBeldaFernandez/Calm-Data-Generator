@@ -195,8 +195,45 @@ synthetic = gen.generate(
 
 
 
----
+| `custom_distributions` | `None` | Proporciones por clase para la generación |
 
+#### Utilidades de Flujo de Trabajo para Single-Cell
+
+Para los usuarios que trabajan con transcriptómica de célula única (single-cell), `RealGenerator` proporciona una utilidad para convertir los DataFrames sintéticos generados de vuelta a objetos `AnnData`, que es el formato estándar para librerías de análisis como `scanpy` o `squidpy`.
+
+**`to_anndata(df, target_col=None, obs_cols=None)`** (Método Estático)
+
+Convierte un DataFrame sintético (la salida de `generate()`) en un objeto `AnnData`.
+
+| Parámetro | Tipo | Defecto | Descripción |
+|-----------|------|---------|-------------|
+| `df` | `pd.DataFrame` | **requerido** | El DataFrame sintético generado por `calm_data_generator`. |
+| `target_col` | `str` | `None` | La columna que se usará como `cell_type` en `adata.obs`. |
+| `obs_cols` | `List[str]` | `None` | Lista de columnas adicionales que se moverán de la matriz de características (`X`) a los metadatos (`obs`). |
+
+**Ejemplo:**
+```python
+from calm_data_generator.generators.tabular import RealGenerator
+
+# 1. Generar datos sintéticos (ej. usando scANVI)
+synthetic_df = gen.generate(
+    data=real_adata,
+    n_samples=2000,
+    method="scanvi",
+    target_col="cell_type"
+)
+
+# 2. Convertir de vuelta a AnnData para análisis con scanpy
+synthetic_adata = RealGenerator.to_anndata(
+    synthetic_df, 
+    target_col="cell_type"
+)
+
+# 3. Análisis estándar con scanpy
+import scanpy as sc
+sc.pp.pca(synthetic_adata)
+sc.pl.pca(synthetic_adata, color="cell_type")
+```
 
 ---
 

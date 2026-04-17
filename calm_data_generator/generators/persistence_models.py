@@ -1,3 +1,7 @@
+import logging
+
+_logger = logging.getLogger(__name__)
+
 try:
     import torch
     import torch.nn as nn
@@ -37,19 +41,20 @@ try:
         Stores conditional models for each feature and marginal distributions for initialization.
         """
 
-        def __init__(self, models, marginals, encoding_info, visit_order):
+        def __init__(self, models, marginals, encoding_info, visit_order, random_state=None):
             self.models = models  # Dict[col, model]
             self.marginals = marginals  # Dict[col, values_to_sample]
             self.encoding_info = (
                 encoding_info  # Dict[col, categories] for reconstruction
             )
             self.visit_order = visit_order  # List[col]
+            self.rng = np.random.default_rng(random_state)
 
         def generate(self, n_samples):
             # 1. Initialize from marginals
             synth_data = {}
             for col, values in self.marginals.items():
-                synth_data[col] = np.random.choice(values, size=n_samples, replace=True)
+                synth_data[col] = self.rng.choice(values, size=n_samples, replace=True)
 
             X_synth = pd.DataFrame(synth_data)
 
@@ -74,16 +79,19 @@ try:
                 # In _synthesize_fcs_generic, we checked "LGBM" in class name.
                 is_native_cat = any(name in model.__class__.__name__ for name in ("LGBM", "XGB"))
 
-                Xs_encoded = Xs.copy()
                 if not is_native_cat:
-                    for c in Xs_encoded.select_dtypes(include=["category"]).columns:
-                        if c in self.encoding_info:
-                            # Force categories alignment
-                            Xs_encoded[c] = pd.Categorical(
-                                Xs_encoded[c], categories=self.encoding_info[c]
-                            )
-                        # Encode to codes as expected by sklearn trees
-                        Xs_encoded[c] = Xs_encoded[c].cat.codes
+                    cat_enc_cols = Xs.select_dtypes(include=["category"]).columns
+                    updates = {}
+                    for c in cat_enc_cols:
+                        aligned = (
+                            pd.Categorical(Xs[c], categories=self.encoding_info[c])
+                            if c in self.encoding_info
+                            else Xs[c].astype("category")
+                        )
+                        updates[c] = aligned.codes
+                    Xs_encoded = Xs.assign(**updates) if updates else Xs
+                else:
+                    Xs_encoded = Xs
 
                 # Predict
                 new_vals = None
@@ -97,15 +105,16 @@ try:
                         # Optimization: If binary, use vectorization
                         if len(classes) == 2:
                             p1 = probs[:, 1]
-                            draws = np.random.rand(n_samples)
+                            draws = self.rng.random(n_samples)
                             preds_idx = (draws < p1).astype(int)
                             new_vals = classes[preds_idx]
                         else:
                             # Slow row-wise sampling for multiclass
                             new_vals = np.array(
-                                [np.random.choice(classes, p=p) for p in probs]
+                                [self.rng.choice(classes, p=p) for p in probs]
                             )
-                    except Exception:
+                    except Exception as e:
+                        _logger.warning(f"predict_proba failed; falling back to predict(). Reason: {e}")
                         # Fallback to direct prediction if proba fails
                         new_vals = model.predict(Xs_encoded)
                 else:

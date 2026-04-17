@@ -108,3 +108,5 @@ class ReportConfig(BaseModel):
     constraints_stats: Optional[Dict[str, int]] = None
     sequence_config: Optional[Dict] = None
     per_block_external_reports: bool = False
+    use_scgft: bool = False
+

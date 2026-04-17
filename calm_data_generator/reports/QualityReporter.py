@@ -14,6 +14,18 @@ import logging
 from datetime import datetime
 import os
 import json
+import io
+import contextlib
+sc = None
+ad = None
+try:
+    from scgft_evaluator import ScGFT_Evaluator
+    import scanpy as sc
+    import anndata as ad
+    SCGFT_AVAILABLE = True
+except ImportError:
+    SCGFT_AVAILABLE = False
+
 try:
     from sklearn.cluster import KMeans
     from sklearn.metrics import adjusted_rand_score
@@ -179,6 +191,7 @@ class QualityReporter(BaseReporter):
         privacy_check = report_config.privacy_check
         use_minimal = report_config.minimal
         adversarial_validation = report_config.adversarial_validation
+        use_scgft = report_config.use_scgft
 
         # Force minimal override if self.minimal is explicitly True?
         # If config says False but self.minimal is True...
@@ -203,16 +216,16 @@ class QualityReporter(BaseReporter):
         )
 
         # === Resampling Logic ===
-        real_df_for_report = real_df.copy()
-        synthetic_df_for_report = synthetic_df.copy()
-
         if resample_rule is not None:
             real_df_for_report = self._apply_resampling(
-                real_df_for_report, final_time_col, block_column, resample_rule
+                real_df, final_time_col, block_column, resample_rule
             )
             synthetic_df_for_report = self._apply_resampling(
-                synthetic_df_for_report, final_time_col, block_column, resample_rule
+                synthetic_df, final_time_col, block_column, resample_rule
             )
+        else:
+            real_df_for_report = real_df
+            synthetic_df_for_report = synthetic_df
 
         # ===  Quality Assessment ===
         sdmetrics_quality = self._assess_quality_scores(
@@ -399,6 +412,10 @@ class QualityReporter(BaseReporter):
                     minimal=use_minimal,
                 )
 
+        # === scGFT Single-Cell Evaluation ===
+        if use_scgft:
+            self._run_scgft_evaluation(real_df_for_report, synthetic_df_for_report, output_dir, target_column)
+
         # === Generate Dashboard ===
         LocalIndexGenerator.create_index(output_dir)
 
@@ -459,8 +476,8 @@ class QualityReporter(BaseReporter):
                     dropped = set(real_df.columns) - set(common_cols)
                     print(f"   -> Aligning columns for (dropped: {dropped})")
 
-            real_aligned = real_df[common_cols].copy()
-            synth_aligned = synthetic_df[common_cols].copy()
+            real_aligned = real_df[common_cols]
+            synth_aligned = synthetic_df[common_cols]
 
             # Build metadata for sdmetrics
             # Simple metadata inference
@@ -577,7 +594,8 @@ class QualityReporter(BaseReporter):
                 real_unique, on=list(synthetic_df.columns), how="left", indicator=True
             )
             cross_dup_count = (merged["_merge"] == "both").sum()
-        except Exception:
+        except Exception as e:
+            self.logger.warning(f"Could not compute cross-duplication count; defaulting to 0. Reason: {e}")
             cross_dup_count = 0
 
         total_bad = internal_dup_count + cross_dup_count
@@ -785,3 +803,122 @@ class QualityReporter(BaseReporter):
         except Exception as e:
             logger.error(f"ARI calculation failed: {e}")
             return None
+
+    def _run_scgft_evaluation(
+        self, 
+        real_df: pd.DataFrame, 
+        synthetic_df: pd.DataFrame, 
+        output_dir: str,
+        target_col: Optional[str] = None
+    ) -> None:
+        """
+        Runs the scGFT_evaluador single-cell validation and saves output to HTML.
+        """
+        if not SCGFT_AVAILABLE:
+            if self.verbose:
+                print("\n[WARNING] scgft-evaluator not found. Install with: pip install git+https://github.com/nasim23ea/scgft-evaluator.git")
+            return
+
+        if self.verbose:
+            print("\n" + "="*40)
+            print("RUNNING scGFT SINGLE-CELL EVALUATION")
+            print("="*40)
+
+        try:
+            # 1. Convert to AnnData
+            # Assume all numeric columns are gene expression
+            numeric_cols = real_df.select_dtypes(include=[np.number]).columns.tolist()
+            if target_col and target_col in numeric_cols:
+                numeric_cols.remove(target_col)
+            
+            adata_real = ad.AnnData(real_df[numeric_cols])
+            adata_synth = ad.AnnData(synthetic_df[numeric_cols])
+            
+            if target_col and target_col in real_df.columns:
+                adata_real.obs["cell_type"] = real_df[target_col].astype(str).values
+                adata_synth.obs["cell_type"] = synthetic_df[target_col].astype(str).values
+            else:
+                # Mock cell types if not provided
+                adata_real.obs["cell_type"] = "unknown"
+                adata_synth.obs["cell_type"] = "unknown"
+
+            # 2. Basic Preprocessing for scvi metrics (PCA is required)
+            if self.verbose:
+                print("   -> Preprocessing AnnData (PCA)...")
+            
+            sc.pp.pca(adata_real)
+            sc.pp.pca(adata_synth)
+
+            # 3. Determine groups and gene list
+            genes_top = numeric_cols
+            # Sort groups for deterministic orden regardless of appearance order
+            grupos = sorted([str(g) for g in adata_real.obs["cell_type"].unique().tolist()])
+            if len(grupos) < 2:
+                raise ValueError("scGFT evaluation requires at least 2 groups in target_col.")
+            grupo_a, grupo_b = grupos[0], grupos[1]
+
+            # 4. Run evaluator
+            # Seed global RNG before MMD permutation test for reproducibility
+            np.random.seed(42)
+            f = io.StringIO()
+            with contextlib.redirect_stdout(f):
+                results = ScGFT_Evaluator.run_all(
+                    adata_real, adata_synth,
+                    genes_top=genes_top,
+                    col_grupo="cell_type",
+                    grupo_a=grupo_a,
+                    grupo_b=grupo_b,
+                )
+
+            output_text = f.getvalue()
+
+            if self.verbose:
+                print(output_text)
+                print(results.to_string(index=False))
+
+            # 4. Save to HTML Report
+            scgft_report_path = os.path.join(output_dir, "scgft_report.html")
+            
+            html_content = f"""
+            <html>
+            <head>
+                <title>scGFT Single-Cell Evaluation</title>
+                <style>
+                    body {{ font-family: 'Inter', sans-serif; background: #f8fafc; padding: 40px; color: #1e293b; }}
+                    .container {{ max-width: 900px; margin: 0 auto; background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); }}
+                    h1 {{ color: #0f172a; border-bottom: 2px solid #e2e8f0; padding-bottom: 15px; }}
+                    pre {{ background: #1e293b; color: #f8fafc; padding: 20px; border-radius: 8px; overflow-x: auto; font-size: 14px; line-height: 1.5; }}
+                    .metric-box {{ background: #f1f5f9; border-left: 4px solid #3b82f6; padding: 15px; margin: 20px 0; }}
+                    .footer {{ margin-top: 30px; font-size: 12px; color: #64748b; text-align: center; }}
+                    .results-table {{ width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }}
+                    .results-table th {{ background: #3b82f6; color: white; padding: 8px 12px; text-align: left; }}
+                    .results-table td {{ padding: 8px 12px; border-bottom: 1px solid #e2e8f0; }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <h1>scGFT Single-Cell Evaluation Report</h1>
+                    <div class="metric-box">
+                        <strong>Evaluation Methodology:</strong> Graph Fourier Transform based manifold preservation.
+                    </div>
+                    <pre>{output_text}</pre>
+                    <h2>Results</h2>
+                    {results.to_html(index=False, border=0, classes="results-table")}
+                    <div class="footer">
+                        Generated by calm_data_generator with scgft-evaluator support.
+                    </div>
+                </div>
+            </body>
+            </html>
+            """
+            
+            with open(scgft_report_path, "w") as html_file:
+                html_file.write(html_content)
+
+            if self.verbose:
+                print(f"   -> scGFT report saved to: {scgft_report_path}")
+
+        except Exception as e:
+            logger.error(f"scGFT evaluation failed: {e}")
+            if self.verbose:
+                print(f"   -> [ERROR] scGFT evaluation failed: {e}")

@@ -22,20 +22,16 @@ Key Features:
 
 import logging
 import math
+import os
+import tempfile
+import joblib
+import zipfile
 import warnings
 import pandas as pd
 import numpy as np
 import torch
 from tqdm import tqdm
-
 from typing import Optional, Dict, Any, List, Union
-import logging
-import os
-import math
-import sys
-import tempfile
-import joblib
-import zipfile
 
 
 # Synthcity and customized dependencies are lazy-loaded
@@ -76,7 +72,6 @@ class RealGenerator(BaseGenerator):
         self._loguru_handler_id = None # Track our specific sink
         try:
             from loguru import logger as loguru_logger
-            import synthcity.logger as sclog
             import re
             
             # Note: We avoid calling loguru_logger.remove() globally to not break other libs
@@ -84,8 +79,8 @@ class RealGenerator(BaseGenerator):
             if hasattr(self, "_loguru_handler_id") and self._loguru_handler_id is not None:
                 try:
                     loguru_logger.remove(self._loguru_handler_id)
-                except Exception:
-                    pass
+                except ValueError as e:
+                    self.logger.debug(f"Could not remove loguru handler {self._loguru_handler_id}: {e}")
 
             def capture_synthcity_metrics(message):
                 # Only capture if THIS instance is currently the one training
@@ -626,21 +621,6 @@ class RealGenerator(BaseGenerator):
         return None
 
     def get_decoder(self) -> Optional[Any]:
-        """
-        Returns the decoder network of the trained model, if it exists.
-
-        Supported methods and what is returned:
-            - tvae / rtvae: the Synthcity PyTorch decoder
-            - scvi: ``module.decoder``
-            - ddpm / timegan / timevae / fflows: the internal decoder if the
-              Synthcity plugin exposes one, otherwise None
-            - gears: None (GEARS has no explicit encoder/decoder split)
-            - gmm / copula / bayesian_network: None (no neural decoder)
-            - smote / adasyn / resample / cart / rf / lgbm: None
-
-        Returns:
-            The decoder module, or None if not available.
-        """
         if not self.synthesizer:
             return None
 
@@ -663,6 +643,54 @@ class RealGenerator(BaseGenerator):
                 return None
 
         return None
+
+    @staticmethod
+    def to_anndata(
+        df: pd.DataFrame, 
+        target_col: Optional[str] = None, 
+        obs_cols: Optional[List[str]] = None
+    ):
+        """
+        Converts a generated synthetic DataFrame back to an AnnData object.
+        
+        Args:
+            df (pd.DataFrame): The synthetic data.
+            target_col (str): Column to use as 'cell_type' in adata.obs.
+            obs_cols (list): Additional columns to move from features (X) to metadata (obs).
+            
+        Returns:
+            anndata.AnnData: The data in single-cell format.
+        """
+        try:
+            import anndata as ad
+        except ImportError:
+            raise ImportError("anndata is required. Please install it with 'pip install anndata'")
+
+        obs_cols = obs_cols or []
+        if target_col and target_col not in obs_cols:
+            obs_cols.append(target_col)
+            
+        # Filter existing obs_cols
+        obs_cols = [c for c in obs_cols if c in df.columns]
+        
+        # Features (X)
+        x_cols = [c for c in df.columns if c not in obs_cols]
+        
+        # Numeric only for X usually
+        numeric_x = df[x_cols].select_dtypes(include=[np.number])
+        if len(numeric_x.columns) < len(x_cols):
+             warnings.warn(f"Dropping non-numeric columns from X: {set(x_cols) - set(numeric_x.columns)}")
+        
+        adata = ad.AnnData(X=numeric_x.values.astype(np.float32))
+        adata.var_names = numeric_x.columns.tolist()
+        adata.obs_names = [f"cell_{i}" for i in range(len(df))]
+        
+        if obs_cols:
+            adata.obs = df[obs_cols].copy()
+            if target_col and target_col in adata.obs.columns:
+                adata.obs["cell_type"] = adata.obs[target_col].astype(str)
+                
+        return adata
 
     def _get_model_params(
         self, method: str, user_params: Optional[Dict] = None
@@ -1136,7 +1164,7 @@ class RealGenerator(BaseGenerator):
         
         generated_parts = []
         
-        for i, stage in enumerate(stages_to_generate):
+        for i, _ in enumerate(stages_to_generate):
             count = sample_per_stage + (1 if i < remainder else 0)
             part = syn.generate(count=count).dataframe()
             generated_parts.append(part)
@@ -2053,7 +2081,8 @@ class RealGenerator(BaseGenerator):
                 try:
                     s = pd.to_datetime(s)
                     s = (s - s.iloc[0]).dt.total_seconds().astype(float)
-                except Exception:
+                except Exception as e:
+                    self.logger.debug(f"Could not parse datetime column; falling back to integer index. Reason: {e}")
                     s = pd.Series(range(len(times_array)), dtype=float)
             return s.tolist()
 
@@ -2203,7 +2232,8 @@ class RealGenerator(BaseGenerator):
                 try:
                     s = pd.to_datetime(s)
                     s = (s - s.iloc[0]).dt.total_seconds().astype(float)
-                except Exception:
+                except Exception as e:
+                    self.logger.debug(f"Could not parse datetime column; falling back to integer index. Reason: {e}")
                     s = pd.Series(range(len(times_array)), dtype=float)
             return s.tolist()
 
@@ -2336,7 +2366,8 @@ class RealGenerator(BaseGenerator):
                 try:
                     s = pd.to_datetime(s)
                     s = (s - s.iloc[0]).dt.total_seconds().astype(float)
-                except Exception:
+                except Exception as e:
+                    self.logger.debug(f"Could not parse datetime column; falling back to integer index. Reason: {e}")
                     s = pd.Series(range(len(times_array)), dtype=float)
             return s.tolist()
 
@@ -2561,9 +2592,9 @@ class RealGenerator(BaseGenerator):
         try:
             import torch
             try:
-                import torchvision
-            except Exception:
-                pass
+                import torchvision  # noqa: F401
+            except Exception as e:
+                self.logger.debug(f"torchvision not available (optional): {e}")
             import anndata
             import scvi
         except ImportError as e:
@@ -2692,7 +2723,8 @@ class RealGenerator(BaseGenerator):
                 px_dist = generative_outputs["px"]
                 try:
                     synth_expr = px_dist.sample() if hasattr(px_dist, "sample") else px_dist.mean
-                except Exception:
+                except Exception as e:
+                    self.logger.warning(f"scANVI px_dist sampling failed; using zero tensor as fallback. Reason: {e}")
                     synth_expr = torch.zeros((n_cls, adata.n_vars), dtype=torch.float32)
 
                 if hasattr(synth_expr, "cpu"):
@@ -2755,9 +2787,9 @@ class RealGenerator(BaseGenerator):
             # (torchvision._meta_registrations depends on torchvision.extension being
             # fully initialized before lightning/torchmetrics trigger a re-import)
             try:
-                import torchvision
-            except Exception:
-                pass
+                import torchvision  # noqa: F401
+            except Exception as e:
+                self.logger.debug(f"torchvision not available (optional): {e}")
             import anndata
             import scvi
         except ImportError as e:
@@ -3013,7 +3045,8 @@ class RealGenerator(BaseGenerator):
                     synthetic_expression = px_dist.sample()
                 else:
                     synthetic_expression = px_dist.mean
-            except Exception:
+            except Exception as e:
+                self.logger.warning(f"scVI px_dist sampling failed; using zero tensor as fallback. Reason: {e}")
                 synthetic_expression = torch.zeros(
                     (n_samples, adata.n_vars), dtype=torch.float32
                 )
@@ -3333,17 +3366,14 @@ class RealGenerator(BaseGenerator):
         # Align categories for LGBM/Categorical handling
         cat_cols = X_real.select_dtypes(include="category").columns
         for col in cat_cols:
-            if X_real[col].dtype.name == "category":
-                X_synth[col] = pd.Categorical(
-                    X_synth[col], categories=X_real[col].cat.categories
-                )
+            X_synth[col] = pd.Categorical(
+                X_synth[col], categories=X_real[col].cat.categories
+            )
 
         try:
             # Storage for persistence
             fitted_models = {}
-            encoding_info = {}
-            for col in X_real.select_dtypes(include="category").columns:
-                encoding_info[col] = X_real[col].cat.categories
+            encoding_info = {col: X_real[col].cat.categories for col in cat_cols}
 
             # Marginals for initialization (using raw values for sampling)
             # We store the unique values and their counts to sample with replacement respecting distribution
@@ -3404,31 +3434,29 @@ class RealGenerator(BaseGenerator):
                     is_lgbm = "LGBM" in model.__class__.__name__
 
                     if not is_lgbm:
-                        # Sklearn encoding
-                        X_to_fit = X_to_fit.copy()
-                        Xs_synth_input = Xs_synth.copy()
-                        for c in X_to_fit.select_dtypes(include=["category"]).columns:
-                            # Ensure X_to_fit is definitely category (redundant safety)
-                            if not isinstance(X_to_fit[c].dtype, pd.CategoricalDtype):
-                                X_to_fit[c] = X_to_fit[c].astype("category")
-
-                            # Ensure Xs_synth_input is cast to the SAME categories before encoding
-                            # This fixes the AttributeError: Can only use .cat accessor...
+                        # Sklearn encoding — use assign() to avoid full DataFrame copy
+                        cat_cols = [
+                            c for c in X_to_fit.columns
+                            if pd.api.types.is_categorical_dtype(X_to_fit[c])
+                            or isinstance(X_to_fit[c].dtype, pd.CategoricalDtype)
+                        ]
+                        fit_updates = {}
+                        synth_updates = {}
+                        for c in cat_cols:
+                            fit_cat = X_to_fit[c].astype("category")
                             try:
-                                # Re-cast to match training categories exactly
-                                Xs_synth_input[c] = Xs_synth_input[c].astype(
-                                    X_to_fit[c].dtype
+                                synth_cast = Xs_synth[c].astype(fit_cat.dtype)
+                            except Exception as e:
+                                self.logger.debug(f"dtype cast failed for column '{c}'; forcing category alignment. Reason: {e}")
+                                synth_cast = pd.Categorical(
+                                    Xs_synth[c],
+                                    categories=fit_cat.cat.categories,
                                 )
-                            except Exception:
-                                # Fallback: if categories don't match, force conversion
-                                Xs_synth_input[c] = pd.Categorical(
-                                    Xs_synth_input[c],
-                                    categories=X_to_fit[c].cat.categories,
-                                )
-
-                            # Now safe to encode
-                            X_to_fit[c] = X_to_fit[c].cat.codes
-                            Xs_synth_input[c] = Xs_synth_input[c].cat.codes
+                            fit_updates[c] = fit_cat.cat.codes
+                            # synth_cast is a Series (has .cat) or a pd.Categorical (has .codes directly)
+                            synth_updates[c] = synth_cast.cat.codes if isinstance(synth_cast, pd.Series) else synth_cast.codes
+                        X_to_fit = X_to_fit.assign(**fit_updates)
+                        Xs_synth_input = Xs_synth.assign(**synth_updates)
                     else:
                         # LGBM input
                         Xs_synth_input = Xs_synth
@@ -3448,7 +3476,8 @@ class RealGenerator(BaseGenerator):
 
                         try:
                             fitted_models[col] = copy.deepcopy(model)
-                        except Exception:
+                        except Exception as e:
+                            self.logger.warning(f"deepcopy failed for model on column '{col}'; storing reference instead. Reason: {e}")
                             fitted_models[col] = model  # Fallback if deepcopy fails
 
                     if (
@@ -3485,6 +3514,7 @@ class RealGenerator(BaseGenerator):
                 marginals=marginals,
                 encoding_info=encoding_info,
                 visit_order=list(X_real.columns),
+                random_state=self.random_state,
             )
             self.method = method_name
             self.metadata = {"columns": data.columns.tolist()}
@@ -4071,14 +4101,18 @@ class RealGenerator(BaseGenerator):
             if len(categories) <= 1:
                 continue
 
-            def randomize(val):
-                if np.random.random() < p:
-                    return val  # keep true value
-                # return random other category
-                others = [c for c in categories if c != val]
-                return np.random.choice(others) if others else val
-
-            result[col] = data[col].apply(randomize)
+            # Vectorized randomized response: flip rows where random draw >= p
+            col_arr = data[col].to_numpy()
+            keep_mask = np.random.random(len(col_arr)) < p
+            new_vals = col_arr.copy()
+            flip_positions = np.where(~keep_mask)[0]
+            if len(flip_positions) > 0:
+                for uval in np.unique(col_arr[flip_positions]):
+                    sub_pos = flip_positions[col_arr[flip_positions] == uval]
+                    others = [c for c in categories if c != uval]
+                    if others:
+                        new_vals[sub_pos] = np.random.choice(others, size=len(sub_pos))
+            result[col] = new_vals
 
         self.logger.info("Privatization complete.")
         return result

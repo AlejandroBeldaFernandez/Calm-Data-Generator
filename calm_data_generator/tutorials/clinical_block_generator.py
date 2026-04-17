@@ -11,10 +11,6 @@ import pandas as pd
 import shutil
 import os
 
-try:
-    from river import synth
-except ImportError:
-    from river.datasets import synth
 from calm_data_generator.generators.clinical.ClinicGeneratorBlock import (
     ClinicalDataGeneratorBlock,
 )
@@ -29,25 +25,12 @@ gen = ClinicalDataGeneratorBlock()
 
 print("\n--- Generating Multi-Center Clinical Data ---")
 
-# Scenario: Simulating data from 3 different hospitals (blocks)
-# We use River generators to seed the randomness/concept for each block
-# If we wanted "center effects", we could use different seeds or generator types
-
-# Hospital A (Seed 42)
-gen_A = synth.Agrawal(classification_function=0, seed=42)
-# Hospital B (Seed 100) - Different patterns
-gen_B = synth.Agrawal(classification_function=0, seed=100)
-# Hospital C (Seed 999) - Different patterns
-gen_C = synth.Agrawal(classification_function=0, seed=999)
-
-
 full_path = gen.generate(
     output_dir=OUTPUT_DIR,
     filename="multi_center_study.csv",
     n_blocks=3,
     total_samples=150,  # 50 patients per hospital
     n_samples_block=[50, 50, 50],
-    generators=[gen_A, gen_B, gen_C],
     target_col="diagnosis",
     date_start="2024-01-01",
     date_step={

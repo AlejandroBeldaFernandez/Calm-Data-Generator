@@ -27,6 +27,7 @@ La biblioteca `calm_data_generator` incluye un conjunto de herramientas de repor
 | `constraints_stats` | Dict[str, int] | `None` | Estadísticas de violación de restricciones |
 | `sequence_config` | Dict | `None` | Configuración para análisis basado en secuencias |
 | `per_block_external_reports` | bool | `False` | Generar reportes separados por bloque |
+| `use_scgft` | bool | `False` | Habilitar evaluación especializada scGFT para single-cell |
 
 ### Ejemplos de Uso
 
@@ -172,6 +173,35 @@ reporter.generate_report(
 )
 ```
 
+
+## Evaluación Single-Cell (scGFT)
+**Módulo:** `calm_data_generator.reports.QualityReporter`
+
+La biblioteca integra `scGFT_evaluador` para proporcionar validación especializada para datos de secuenciación de ARN de célula única (scRNA-seq). Este método utiliza Transformadas de Fourier en Grafos (GFT) para evaluar si los datos sintéticos preservan el manifold subyacente y la estructura biológica de las células originales.
+
+### Características Clave
+- **Preservación del Manifold**: Evalúa si se mantienen las relaciones célula a célula.
+- **Integridad de Clusters/Poblaciones**: Proporciona métricas sobre qué tan bien las células sintéticas representan las poblaciones reales.
+- **Integración en el Dashboard**: Genera una pestaña dedicada `scgft_report.html` en el panel HTML.
+
+### Uso
+Para activar esta evaluación, asegúrese de tener instalados `scGFT_evaluador`, `scanpy` y `anndata`, luego establezca `use_scgft=True` en su `ReportConfig`:
+
+```python
+from calm_data_generator.generators.configs import ReportConfig
+
+reporter.generate_comprehensive_report(
+    ...,
+    report_config=ReportConfig(
+        output_dir="./sc_report",
+        use_scgft=True,
+        target_column="cell_type"  # Opcional: usar para evaluar conservación de poblaciones
+    )
+)
+```
+
+> [!IMPORTANT]
+> **Formato de Datos**: Este método está diseñado específicamente para datos de célula única donde las columnas representan genes y las filas representan células. **No se recomienda** para datos estándar de bulk o tabulares.
 
 ## Reporter Clínico (`Clinical`)
 **Módulo:** `calm_data_generator.generators.clinical.ClinicReporter`

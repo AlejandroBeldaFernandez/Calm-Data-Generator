@@ -451,6 +451,18 @@ class ClinicalDataGenerator(ComplexGenerator):
 
         return df_temp, raw_demographic_data
 
+    def _apply_constraints(self, df: pd.DataFrame, constraints: List[Dict]) -> pd.DataFrame:
+        mask = pd.Series(True, index=df.index)
+        for c in constraints:
+            col, op, val = c.get("col"), c.get("op"), c.get("val")
+            if col not in df.columns: continue
+            if op == ">=": mask &= df[col] >= val
+            elif op == "<=": mask &= df[col] <= val
+            elif op == "==": mask &= df[col] == val
+            elif op == ">": mask &= df[col] > val
+            elif op == "<": mask &= df[col] < val
+        return df[mask].copy()
+
     def _prepare_demographic_context(
         self,
         demographic_df,
@@ -1293,15 +1305,15 @@ class ClinicalDataGenerator(ComplexGenerator):
         if not patient_ids_to_modify:
             return updated_demographic_df, updated_omics_data_df
 
-        # Update demographic data
-        for patient_id in patient_ids_to_modify:
-            current_group = updated_demographic_df.loc[patient_id, "Group"]
-            new_group = "Disease" if current_group == "Control" else "Control"
-            updated_demographic_df.loc[patient_id, "Group"] = new_group
-            if "Binary_Group" in updated_demographic_df.columns:
-                updated_demographic_df.loc[patient_id, "Binary_Group"] = (
-                    1 if new_group == "Disease" else 0
-                )
+        # Update demographic data (vectorized)
+        modify_idx = pd.Index(patient_ids_to_modify)
+        mask_control = updated_demographic_df.loc[modify_idx, "Group"] == "Control"
+        mask_disease = ~mask_control
+        updated_demographic_df.loc[modify_idx[mask_control], "Group"] = "Disease"
+        updated_demographic_df.loc[modify_idx[mask_disease], "Group"] = "Control"
+        if "Binary_Group" in updated_demographic_df.columns:
+            updated_demographic_df.loc[modify_idx[mask_control], "Binary_Group"] = 1
+            updated_demographic_df.loc[modify_idx[mask_disease], "Binary_Group"] = 0
 
         # Regenerate omics data for all transitioned patients
         if patient_ids_to_modify:

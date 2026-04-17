@@ -4,6 +4,32 @@ Todos los cambios notables de CALM-Data-Generator están documentados aquí.
 
 ---
 
+## [2.1.0] — 2026-04-17
+
+### Rendimiento
+
+- **Clinic.py** — bucle de transición de grupos vectorizado con máscaras booleanas; elimina llamadas `.loc` O(n) por paciente
+- **DriftInjector** — eliminado `df.copy()` redundante en `inject_composite_drift`; cada método drift ya copia internamente
+- **RealGenerator — codificación FCS** — reemplazado `copy()` + mutación in-place por `assign()` por iteración; evita dos copias completas del DataFrame por (iteración × columna)
+- **DriftInjector — `_apply_cat_drift`** — vectorizado por grupo de valor con `rng.choice(size=n)`; O(cats) llamadas en lugar de O(n)
+- **RealGenerator — privatización** — reemplazado closure `apply(randomize)` por máscara numpy + `np.random.choice` agrupado; elimina overhead Python por elemento
+- **QualityReporter** — evita `df.copy()` incondicional cuando no hay resampling; copia diferida al bloque condicional
+- **persistence_models** — reemplazado `copy()` + mutación in-place por `assign()`; skip de copia para modelos nativos de categorías (LGBM/XGB)
+- **RealGenerator** — cacheo del resultado de `select_dtypes`; `encoding_info` colapsado a dict comprehension
+
+### Correcciones de Bugs
+
+- **FCSModel RNG** — reemplazadas llamadas globales `np.random` por `numpy.random.default_rng(random_state)` con semilla para reproducibilidad
+- **Integración ScGFT** — corregida firma de `ScGFT_Evaluator.run_all()` (`genes_top`, `col_grupo`, `grupo_a`, `grupo_b`); eliminado parámetro inválido `label_col`
+- **RealGenerator** — limpieza de imports duplicados y no utilizados
+
+### Dependencias
+
+- Añadidos `statsmodels>=0.14.0,<0.15.0` y `tqdm>=4.60.0,<5.0.0` (faltaban en requirements)
+- Migrado scGFT de módulo vendorizado `scGFT_Evaluator.py` a paquete instalable `scgft-evaluator`
+
+---
+
 ## [2.0.0] — 2026-03-27
 
 ### Nuevas Funcionalidades

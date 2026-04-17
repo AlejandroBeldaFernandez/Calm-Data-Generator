@@ -45,6 +45,7 @@ class LocalIndexGenerator:
             <h2>CalmOps Report</h2>
             <!-- YDATA_SECTION -->
             <!-- PLOTLY_SECTION -->
+            <!-- SC_SECTION -->
         </div>
         
         <div class="content">
@@ -178,10 +179,37 @@ class LocalIndexGenerator:
                     '''
                     iframes_html += f'<iframe id="{rid}" src="{fname}?v={ts}" scrolling="yes"></iframe>\n'
 
+            # === Single Cell Reports Section ===
+            sc_section = ""
+            sc_reports = {
+                "scgft": {
+                    "file": "scgft_report.html",
+                    "label": "scGFT Evaluation",
+                },
+            }
+            
+            found_sc = []
+            for rid, config in sc_reports.items():
+                fname = config["file"]
+                if os.path.exists(os.path.join(output_dir, fname)):
+                    found_sc.append((rid, fname, config["label"]))
+            
+            if found_sc:
+                sc_section = '<div class="section-title">Single Cell Analysis</div>\n'
+                for rid, fname, label in found_sc:
+                    sc_section += f'''
+                    <div class="tab-row">
+                        <button class="nav-btn" onclick="showTab('{rid}')" id="btn-{rid}">{label}</button>
+                        <a href="{fname}" target="_blank" title="Open in New Tab">-></a>
+                    </div>
+                    '''
+                    iframes_html += f'<iframe id="{rid}" src="{fname}?v={ts}" scrolling="yes"></iframe>\n'
+
             # === Assemble HTML ===
             html = LocalIndexGenerator.HTML_TEMPLATE
             html = html.replace("<!-- YDATA_SECTION -->", ydata_section)
             html = html.replace("<!-- PLOTLY_SECTION -->", plotly_section)
+            html = html.replace("<!-- SC_SECTION -->", sc_section)
             html = html.replace("<!-- IFRAMES_PLACEHOLDER -->", iframes_html)
 
             index_path = os.path.join(output_dir, "index.html")
