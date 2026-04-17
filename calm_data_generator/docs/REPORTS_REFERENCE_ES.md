@@ -177,15 +177,28 @@ reporter.generate_report(
 ## Evaluación Single-Cell (scGFT)
 **Módulo:** `calm_data_generator.reports.QualityReporter`
 
-La biblioteca integra `scGFT_evaluador` para proporcionar validación especializada para datos de secuenciación de ARN de célula única (scRNA-seq). Este método utiliza Transformadas de Fourier en Grafos (GFT) para evaluar si los datos sintéticos preservan el manifold subyacente y la estructura biológica de las células originales.
+La biblioteca integra [`scgft-evaluator`](https://github.com/nasim23ea/scgft-evaluator) para proporcionar validación especializada para datos de secuenciación de ARN de célula única (scRNA-seq). Este método utiliza Transformadas de Fourier en Grafos (GFT) para evaluar si los datos sintéticos preservan el manifold subyacente y la estructura biológica de las células originales.
+
+### Instalación
+
+```bash
+pip install scgft-evaluator @ git+https://github.com/nasim23ea/scgft-evaluator.git
+```
+
+O mediante `requirements.txt` (ya incluido en calm-data-generator):
+
+```
+scgft-evaluator @ git+https://github.com/nasim23ea/scgft-evaluator.git
+```
 
 ### Características Clave
 - **Preservación del Manifold**: Evalúa si se mantienen las relaciones célula a célula.
-- **Integridad de Clusters/Poblaciones**: Proporciona métricas sobre qué tan bien las células sintéticas representan las poblaciones reales.
-- **Integración en el Dashboard**: Genera una pestaña dedicada `scgft_report.html` en el panel HTML.
+- **Integridad de Clusters/Poblaciones**: Métricas sobre qué tan bien las células sintéticas representan las poblaciones reales (ARI, MMD, Jaccard, Tau de Kendall).
+- **Comparación DE basada en limma**: Concordancia de expresión diferencial entre real y sintético vía `limma`.
+- **Integración en el Dashboard**: Genera una pestaña dedicada `scgft_report.html` en el panel HTML con tabla de resultados.
 
 ### Uso
-Para activar esta evaluación, asegúrese de tener instalados `scGFT_evaluador`, `scanpy` y `anndata`, luego establezca `use_scgft=True` en su `ReportConfig`:
+Establezca `use_scgft=True` en su `ReportConfig` e indique la columna de tipo celular:
 
 ```python
 from calm_data_generator.generators.configs import ReportConfig
@@ -195,10 +208,12 @@ reporter.generate_comprehensive_report(
     report_config=ReportConfig(
         output_dir="./sc_report",
         use_scgft=True,
-        target_column="cell_type"  # Opcional: usar para evaluar conservación de poblaciones
+        target_column="cell_type"  # columna con las etiquetas de tipo celular
     )
 )
 ```
+
+El evaluador ejecuta `ScGFT_Evaluator.run_all()` comparando las dos poblaciones celulares más frecuentes e imprime una tabla de métricas cuando `verbose=True`.
 
 > [!IMPORTANT]
 > **Formato de Datos**: Este método está diseñado específicamente para datos de célula única donde las columnas representan genes y las filas representan células. **No se recomienda** para datos estándar de bulk o tabulares.

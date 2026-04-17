@@ -177,15 +177,28 @@ reporter.generate_report(
 ## Single-Cell Evaluation (scGFT)
 **Module:** `calm_data_generator.reports.QualityReporter`
 
-The library integrates `scGFT_evaluador` to provide specialized validation for single-cell RNA sequencing (scRNA-seq) data. This method uses Graph Fourier Transforms (GFT) to assess if the synthetic data preserves the underlying manifold and biological structure of the original cells.
+The library integrates [`scgft-evaluator`](https://github.com/nasim23ea/scgft-evaluator) to provide specialized validation for single-cell RNA sequencing (scRNA-seq) data. This method uses Graph Fourier Transforms (GFT) to assess if the synthetic data preserves the underlying manifold and biological structure of the original cells.
+
+### Installation
+
+```bash
+pip install scgft-evaluator @ git+https://github.com/nasim23ea/scgft-evaluator.git
+```
+
+Or via `requirements.txt` (already included in calm-data-generator):
+
+```
+scgft-evaluator @ git+https://github.com/nasim23ea/scgft-evaluator.git
+```
 
 ### Key Features
 - **Manifold Preservation**: Evaluates if the cell-to-cell relationships are maintained.
-- **Cluster/Population Integrity**: Provides metrics on how well synthetic cells represent real populations.
-- **Dashboard Integration**: Generates a dedicated `scgft_report.html` tab in the HTML dashboard.
+- **Cluster/Population Integrity**: Metrics on how well synthetic cells represent real populations (ARI, MMD, Jaccard, Kendall Tau).
+- **Limma-based DE comparison**: Differential expression concordance between real and synthetic via `limma`.
+- **Dashboard Integration**: Generates a dedicated `scgft_report.html` tab in the HTML dashboard with a results table.
 
 ### Usage
-To activate this evaluation, ensure `scGFT_evaluador`, `scanpy`, and `anndata` are installed, then set `use_scgft=True` in your `ReportConfig`:
+Set `use_scgft=True` in your `ReportConfig` and specify the cell-type column:
 
 ```python
 from calm_data_generator.generators.configs import ReportConfig
@@ -195,10 +208,12 @@ reporter.generate_comprehensive_report(
     report_config=ReportConfig(
         output_dir="./sc_report",
         use_scgft=True,
-        target_column="cell_type"  # Optional: use to assess population conservation
+        target_column="cell_type"  # column with cell type labels
     )
 )
 ```
+
+The evaluator runs `ScGFT_Evaluator.run_all()` comparing the two most prevalent cell populations and prints a metrics table when `verbose=True`.
 
 > [!IMPORTANT]
 > **Data Format**: This method is specifically designed for single-cell data where columns represent genes and rows represent cells. It is **not recommended** for standard bulk or tabular data.
