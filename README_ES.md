@@ -97,6 +97,7 @@ Esta biblioteca aprovecha y unifica las mejores herramientas de código abierto 
 | [scvi-tools](https://docs.scvi-tools.org/) | scVI, scANVI | [docs scvi](https://docs.scvi-tools.org/) |
 | [GEARS](https://github.com/snap-stanford/GEARS) | Predicción de perturbaciones (método GEARS) | [docs gears](https://github.com/snap-stanford/GEARS) |
 | [AnnData](https://anndata.readthedocs.io/) | Estructuras de datos single-cell para scVI/scANVI/GEARS | [docs anndata](https://anndata.readthedocs.io/) |
+| [scgft-evaluator](https://github.com/nasim23ea/scgft-evaluator) | Evaluación de calidad single-cell via Graph Fourier Transforms (`use_scgft=True`) | [ver REPORTS_REFERENCE_ES.md](calm_data_generator/docs/REPORTS_REFERENCE_ES.md) |
 
 ### Calidad e Informes
 
@@ -515,6 +516,24 @@ reporter.generate_report(
 # JSON de resultados (incluyendo compared_data_files) guardado en ./quality_report/report_results.json
 ```
 
+Para **datos single-cell**, activa la evaluación [scGFT](https://github.com/nasim23ea/scgft-evaluator) (métricas de preservación de manifold basadas en Transformadas de Fourier en Grafos):
+
+```python
+from calm_data_generator.generators.configs import ReportConfig
+
+reporter.generate_comprehensive_report(
+    real_df=real_df,
+    synthetic_df=synthetic_df,
+    generator_name="MyGen",
+    report_config=ReportConfig(
+        output_dir="./sc_report",
+        use_scgft=True,
+        target_column="cell_type",
+    ),
+)
+# Genera scgft_report.html con métricas ARI, MMD, Jaccard, Kendall Tau
+```
+
 ---
 
 ## Módulos
@@ -614,3 +633,4 @@ Nos apoyamos en hombros de gigantes. Esta librería es posible gracias a estos i
 - **[Hugging Face Hub](https://github.com/huggingface/huggingface_hub)** (Apache-2.0) - Facilitando el intercambio y versionado de modelos.
 - **[Plotly](https://github.com/plotly/plotly.py)** (MIT) - Habilitando visualizaciones de datos interactivas.
 - **[hmmlearn](https://github.com/hmmlearn/hmmlearn)** (BSD-3-Clause) - Potenciando el método `hmm` para generación con drift mediante Modelos Ocultos de Markov.
+- **[scgft-evaluator](https://github.com/nasim23ea/scgft-evaluator)** - Proporcionando evaluación basada en Transformadas de Fourier en Grafos para la valoración de calidad de datos sintéticos single-cell.

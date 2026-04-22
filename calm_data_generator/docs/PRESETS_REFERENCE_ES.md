@@ -521,6 +521,27 @@ preset = SingleCellQualityPreset(random_state=42)
 synthetic_cells = preset.generate(data=adata_df, n_samples=500)
 ```
 
+Para validar la calidad de los datos generados, usa `QualityReporter` con scGFT activado:
+
+```python
+from calm_data_generator.reports.QualityReporter import QualityReporter
+from calm_data_generator.generators.configs import ReportConfig
+
+reporter = QualityReporter(verbose=True)
+reporter.generate_comprehensive_report(
+    real_df=adata_df,
+    synthetic_df=synthetic_cells,
+    generator_name="SingleCellQualityPreset",
+    report_config=ReportConfig(
+        output_dir="./sc_report",
+        use_scgft=True,
+        target_column="cell_type",
+    ),
+)
+```
+
+> Ver [REPORTS_REFERENCE_ES.md](REPORTS_REFERENCE_ES.md#evaluación-single-cell-scgft) para documentación completa de scGFT.
+
 ---
 
 ## Resumen de Imports

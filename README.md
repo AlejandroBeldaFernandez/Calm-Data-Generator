@@ -527,6 +527,26 @@ synthetic = gen.generate(
 |--------|----------|
 | `scvi` | Generate new cells from learned distribution |
 
+Once you have synthetic single-cell data, validate its quality using [scGFT Evaluator](https://github.com/nasim23ea/scgft-evaluator) via `QualityReporter`:
+
+```python
+from calm_data_generator.reports.QualityReporter import QualityReporter
+from calm_data_generator.generators.configs import ReportConfig
+
+reporter = QualityReporter(verbose=True)
+reporter.generate_comprehensive_report(
+    real_df=real_df,
+    synthetic_df=synthetic_df,
+    generator_name="SingleCell_Example",
+    report_config=ReportConfig(
+        output_dir="./sc_report",
+        use_scgft=True,
+        target_column="cell_type",
+    ),
+)
+```
+
+> See [REPORTS_REFERENCE.md](calm_data_generator/docs/REPORTS_REFERENCE.md#single-cell-evaluation-scgft) for full details.
 
 ### Stream Data Generation
 
@@ -562,6 +582,24 @@ reporter.generate_report(
 )
 # Report saved to ./quality_report/report.html
 # Results JSON (including compared_data_files) saved to ./quality_report/report_results.json
+```
+
+For **single-cell data**, enable [scGFT](https://github.com/nasim23ea/scgft-evaluator) evaluation (Graph Fourier Transform-based manifold preservation metrics):
+
+```python
+from calm_data_generator.generators.configs import ReportConfig
+
+reporter.generate_comprehensive_report(
+    real_df=real_df,
+    synthetic_df=synthetic_df,
+    generator_name="MyGen",
+    report_config=ReportConfig(
+        output_dir="./sc_report",
+        use_scgft=True,
+        target_column="cell_type",
+    ),
+)
+# Generates scgft_report.html with ARI, MMD, Jaccard, Kendall Tau metrics
 ```
 
 ---
@@ -699,3 +737,4 @@ We stand on the shoulders of giants. This library is possible thanks to these am
 - **[Hugging Face Hub](https://github.com/huggingface/huggingface_hub)** (Apache-2.0) - Facilitating model sharing and versioning.
 - **[Plotly](https://github.com/plotly/plotly.py)** (MIT) - Enabling interactive data visualizations.
 - **[hmmlearn](https://github.com/hmmlearn/hmmlearn)** (BSD-3-Clause) - Powering the `hmm` method for drift-aware generation via Hidden Markov Models.
+- **[scgft-evaluator](https://github.com/nasim23ea/scgft-evaluator)** - Providing Graph Fourier Transform-based evaluation for single-cell synthetic data quality assessment.

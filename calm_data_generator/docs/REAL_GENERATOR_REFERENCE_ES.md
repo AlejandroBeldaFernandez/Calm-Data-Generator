@@ -235,6 +235,30 @@ sc.pp.pca(synthetic_adata)
 sc.pl.pca(synthetic_adata, color="cell_type")
 ```
 
+**Validación de calidad single-cell con scGFT:**
+
+Tras generar datos sintéticos de célula única, valida su fidelidad usando [scgft-evaluator](https://github.com/nasim23ea/scgft-evaluator):
+
+```python
+from calm_data_generator.reports.QualityReporter import QualityReporter
+from calm_data_generator.generators.configs import ReportConfig
+
+reporter = QualityReporter(verbose=True)
+reporter.generate_comprehensive_report(
+    real_df=real_df,
+    synthetic_df=synthetic_df,
+    generator_name="scVI_SingleCell",
+    report_config=ReportConfig(
+        output_dir="./sc_report",
+        use_scgft=True,
+        target_column="cell_type",
+    ),
+)
+# Genera scgft_report.html con métricas ARI, MMD, Jaccard, Kendall Tau
+```
+
+> Ver [REPORTS_REFERENCE_ES.md](REPORTS_REFERENCE_ES.md#evaluación-single-cell-scgft) para documentación completa.
+
 ---
 
 ## Características Avanzadas
