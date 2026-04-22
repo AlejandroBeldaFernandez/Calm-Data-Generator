@@ -58,7 +58,8 @@ dependencies = [
     "hmmlearn>=0.3.0,<0.4.0",
     "pyarrow>=14.0.0,<15.0.0",
     "setuptools>=59.0.0,<70.0.0",
-    "fsspec>=2025.12.0,<2026.0.0"
+    "fsspec>=2025.12.0,<2026.0.0",
+    "scgft-evaluator @ git+https://github.com/nasim23ea/scgft-evaluator.git"
 ]
 
 [project.urls]
