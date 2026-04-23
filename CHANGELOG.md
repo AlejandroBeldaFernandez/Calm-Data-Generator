@@ -4,6 +4,36 @@ All notable changes to CALM-Data-Generator are documented here.
 
 ---
 
+## [2.2.0] — 2026-04-23
+
+### New Features
+
+- **`RealGenerator.generate()` — `cond` parameter**: Pass a conditioning array/DataFrame directly to Synthcity plugins (`tvae`, `rtvae`, `ctgan`, `dpgan`, `pategan`). Propagated to both `fit()` and `generate()` so the model trains and samples under the same conditional.
+- **`RealGenerator.generate()` — `constraints` retry loop**: When constraint filtering drops rows, the generator now automatically regenerates (`needed × 2` samples, up to 5 retries) to always return `n_samples` rows. Previously the shortfall was logged but not recovered.
+- **Full reproducibility across all methods**: `random_state` is now consistently propagated everywhere it was missing:
+  - `_get_synthesizer()` injects `random_state` into all Synthcity plugin constructors at init time.
+  - `generate()` calls for `tvae`, `rtvae`, `ctgan`, `bn`, `dpgan`, `pategan`, `ddpm`, `timegan`, `timevae`, `fflows`, `conditional_drift` and the latent-differentiation fallback path now all pass `random_state`.
+  - All bare `np.random.*` calls in `scvi`, `scanvi`, `gears`, `fcs_generic` and `privatize()` replaced with `np.random.default_rng(self.random_state)`.
+
+### Documentation
+
+- **scGFT Evaluator** — added to `Acknowledgements & Credits` in `README.md` and `README_ES.md`.
+- **scGFT Evaluator** — added usage examples and cross-references in `SingleCell / Gene Expression` and `Quality Reporting` sections of both READMEs.
+- **`PRESETS_REFERENCE.md` / `PRESETS_REFERENCE_ES.md`** — added scGFT validation example after `SingleCellQualityPreset`.
+- **`REAL_GENERATOR_REFERENCE.md` / `REAL_GENERATOR_REFERENCE_ES.md`** — added scGFT validation section after `to_anndata` workflow.
+- **`README_ES.md`** — added `scgft-evaluator` row to Single-Cell / Omics ecosystem table.
+
+### Dependencies
+
+- `scgft-evaluator @ git+https://github.com/nasim23ea/scgft-evaluator.git` promoted from optional (`requirements.txt` only) to mandatory dependency in `pyproject.toml`.
+
+### Developer Experience
+
+- Added `.pre-commit-config.yaml` with `ruff` (linter + import sorting), `trailing-whitespace`, `end-of-file-fixer`, and `check-merge-conflict` hooks.
+- Added `[tool.ruff]` configuration in `pyproject.toml` (`line-length = 120`, selects `E`, `F`, `W`, `I`, ignores `E501` and `F401`).
+
+---
+
 ## [2.1.0] — 2026-04-17
 
 ### Performance

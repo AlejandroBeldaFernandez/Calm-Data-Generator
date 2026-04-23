@@ -4,6 +4,36 @@ Todos los cambios notables de CALM-Data-Generator están documentados aquí.
 
 ---
 
+## [2.2.0] — 2026-04-23
+
+### Nuevas Funcionalidades
+
+- **`RealGenerator.generate()` — parámetro `cond`**: Pasa un array/DataFrame de condicionamiento directamente a los plugins de Synthcity (`tvae`, `rtvae`, `ctgan`, `dpgan`, `pategan`). Se propaga tanto a `fit()` como a `generate()` para que el modelo entrene y muestree bajo el mismo condicional.
+- **`RealGenerator.generate()` — retry loop en `constraints`**: Cuando el filtrado por restricciones elimina filas, el generador regenera automáticamente (`needed × 2` muestras, hasta 5 reintentos) para devolver siempre `n_samples` filas. Antes el déficit se registraba en el log pero no se recuperaba.
+- **Reproducibilidad completa en todos los métodos**: `random_state` ahora se propaga consistentemente en todos los lugares donde faltaba:
+  - `_get_synthesizer()` inyecta `random_state` en los constructores de todos los plugins de Synthcity al inicializar.
+  - Las llamadas a `generate()` de `tvae`, `rtvae`, `ctgan`, `bn`, `dpgan`, `pategan`, `ddpm`, `timegan`, `timevae`, `fflows`, `conditional_drift` y el path de fallback de diferenciación latente ahora pasan `random_state`.
+  - Todas las llamadas a `np.random.*` sin semilla en `scvi`, `scanvi`, `gears`, `fcs_generic` y `privatize()` reemplazadas por `np.random.default_rng(self.random_state)`.
+
+### Documentación
+
+- **scGFT Evaluator** — añadido a `Agradecimientos y Créditos` en `README.md` y `README_ES.md`.
+- **scGFT Evaluator** — añadidos ejemplos de uso y referencias cruzadas en las secciones `Single-Cell / Gene Expression` e `Informe de Calidad` de ambos READMEs.
+- **`PRESETS_REFERENCE.md` / `PRESETS_REFERENCE_ES.md`** — añadido ejemplo de validación scGFT tras `SingleCellQualityPreset`.
+- **`REAL_GENERATOR_REFERENCE.md` / `REAL_GENERATOR_REFERENCE_ES.md`** — añadida sección de validación scGFT tras el workflow `to_anndata`.
+- **`README_ES.md`** — añadida fila `scgft-evaluator` en la tabla del ecosistema Single-Cell / Omics.
+
+### Dependencias
+
+- `scgft-evaluator @ git+https://github.com/nasim23ea/scgft-evaluator.git` promovido de dependencia opcional (solo `requirements.txt`) a dependencia obligatoria en `pyproject.toml`.
+
+### Experiencia de Desarrollo
+
+- Añadido `.pre-commit-config.yaml` con hooks de `ruff` (linter + ordenación de imports), `trailing-whitespace`, `end-of-file-fixer` y `check-merge-conflict`.
+- Añadida configuración `[tool.ruff]` en `pyproject.toml` (`line-length = 120`, selecciona `E`, `F`, `W`, `I`, ignora `E501` y `F401`).
+
+---
+
 ## [2.1.0] — 2026-04-17
 
 ### Rendimiento

@@ -24,29 +24,26 @@ import logging
 import math
 import os
 import tempfile
-import joblib
-import zipfile
 import warnings
-import pandas as pd
+import zipfile
+from typing import Any, Dict, List, Optional, Union
+
+import joblib
 import numpy as np
+import pandas as pd
 import torch
 from tqdm import tqdm
-from typing import Optional, Dict, Any, List, Union
-
 
 # Synthcity and customized dependencies are lazy-loaded
-
 # Model imports
 # Custom logger and reporter
 from calm_data_generator.generators.base import BaseGenerator
-from calm_data_generator.reports.QualityReporter import QualityReporter
 from calm_data_generator.generators.configs import DateConfig, DriftConfig, ReportConfig
 from calm_data_generator.generators.drift.DriftInjector import DriftInjector
 
-
 # Synthcity import
 from calm_data_generator.generators.persistence_models import FCSModel
-
+from calm_data_generator.reports.QualityReporter import QualityReporter
 
 # Suppress common warnings for cleaner output
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -71,9 +68,10 @@ class RealGenerator(BaseGenerator):
         self.training_history = {}
         self._loguru_handler_id = None # Track our specific sink
         try:
-            from loguru import logger as loguru_logger
             import re
-            
+
+            from loguru import logger as loguru_logger
+
             # Note: We avoid calling loguru_logger.remove() globally to not break other libs
             # We only remove our own if it existed (e.g. from a prior failed __init__)
             if hasattr(self, "_loguru_handler_id") and self._loguru_handler_id is not None:
@@ -93,7 +91,7 @@ class RealGenerator(BaseGenerator):
                     if "loss_evolution" not in self.training_history:
                         self.training_history["loss_evolution"] = []
                     self.training_history["loss_evolution"].append(float(loss_match.group(1)))
-            
+
             # We add a sink that belongs to this specific instance
             self._loguru_handler_id = loguru_logger.add(capture_synthcity_metrics, level="DEBUG")
         except ImportError:
@@ -252,7 +250,7 @@ class RealGenerator(BaseGenerator):
                 part_high = pd.DataFrame(scalers[i_high].inverse_transform(fitted_copulas[i_high].random(n_high)), columns=numeric_cols)
                 parts.append(pd.concat([part_low, part_high], ignore_index=True))
             return pd.concat(parts, ignore_index=True).head(n_samples).reset_index(drop=True)
-        
+
         elif self.method == "hmm":
             samples, _ = self.synthesizer.sample(n_samples)
             numeric_cols = self.metadata.get("numeric_cols")
@@ -307,7 +305,7 @@ class RealGenerator(BaseGenerator):
                 pass  # Keep as float?
 
             return synth_df
-        
+
         from calm_data_generator.generators.tabular.CustomPluginAdapter import CustomPluginAdapter
         if isinstance(self.synthesizer, CustomPluginAdapter):
             return self.synthesizer.generate(n_samples)
@@ -646,18 +644,18 @@ class RealGenerator(BaseGenerator):
 
     @staticmethod
     def to_anndata(
-        df: pd.DataFrame, 
-        target_col: Optional[str] = None, 
+        df: pd.DataFrame,
+        target_col: Optional[str] = None,
         obs_cols: Optional[List[str]] = None
     ):
         """
         Converts a generated synthetic DataFrame back to an AnnData object.
-        
+
         Args:
             df (pd.DataFrame): The synthetic data.
             target_col (str): Column to use as 'cell_type' in adata.obs.
             obs_cols (list): Additional columns to move from features (X) to metadata (obs).
-            
+
         Returns:
             anndata.AnnData: The data in single-cell format.
         """
@@ -669,27 +667,27 @@ class RealGenerator(BaseGenerator):
         obs_cols = obs_cols or []
         if target_col and target_col not in obs_cols:
             obs_cols.append(target_col)
-            
+
         # Filter existing obs_cols
         obs_cols = [c for c in obs_cols if c in df.columns]
-        
+
         # Features (X)
         x_cols = [c for c in df.columns if c not in obs_cols]
-        
+
         # Numeric only for X usually
         numeric_x = df[x_cols].select_dtypes(include=[np.number])
         if len(numeric_x.columns) < len(x_cols):
              warnings.warn(f"Dropping non-numeric columns from X: {set(x_cols) - set(numeric_x.columns)}")
-        
+
         adata = ad.AnnData(X=numeric_x.values.astype(np.float32))
         adata.var_names = numeric_x.columns.tolist()
         adata.obs_names = [f"cell_{i}" for i in range(len(df))]
-        
+
         if obs_cols:
             adata.obs = df[obs_cols].copy()
             if target_col and target_col in adata.obs.columns:
                 adata.obs["cell_type"] = adata.obs[target_col].astype(str)
-                
+
         return adata
 
     def _get_model_params(
@@ -769,6 +767,8 @@ class RealGenerator(BaseGenerator):
                 "synthcity is required for this method. Please install it."
             )
 
+        if self.random_state is not None and "random_state" not in model_kwargs:
+            model_kwargs["random_state"] = self.random_state
         return Plugins().get(method, **model_kwargs)
 
     def _validate_custom_distributions(
@@ -811,8 +811,8 @@ class RealGenerator(BaseGenerator):
         due to BayesianGMM components.
         """
         try:
-            from synthcity.plugins.core.models.tabular_encoder import TabularEncoder
             import synthcity.logger as log
+            from synthcity.plugins.core.models.tabular_encoder import TabularEncoder
 
             # Avoid double patching
             if getattr(TabularEncoder, "_is_patched", False):
@@ -907,25 +907,25 @@ class RealGenerator(BaseGenerator):
         )
         class_counts = data[target_col].value_counts()
         total_original = len(data)
-        
+
         dfs = []
         for cls, count in class_counts.items():
             # Proportional sample count for this class
             n_cls = max(1, int(round(n_samples * count / total_original)))
-            
+
             self.logger.info(
                 f"  Training model for class '{cls}' ({count} orig. samples, "
                 f"generating {n_cls} synthetic)..."
             )
             subset = data[data[target_col] == cls].drop(columns=[target_col])
-            
+
             syn = self._get_synthesizer(synthcity_plugin, **model_kwargs)
             syn.fit(subset)
-            
-            synth = syn.generate(count=n_cls).dataframe()
+
+            synth = syn.generate(count=n_cls, random_state=self.random_state).dataframe()
             synth[target_col] = cls
             dfs.append(synth)
-        
+
         result = pd.concat(dfs, ignore_index=True)
         self.logger.info(
             f"Split-by-class complete. Generated {len(result)} samples across "
@@ -933,7 +933,7 @@ class RealGenerator(BaseGenerator):
         )
         return result
 
-    
+
 
     def _synthesize_ctgan(
         self,
@@ -941,6 +941,7 @@ class RealGenerator(BaseGenerator):
         n_samples: int,
         target_col: Optional[str] = None,
         custom_distributions: Optional[Dict] = None,
+        cond: Optional[Any] = None,
         **model_kwargs,
     ) -> pd.DataFrame:
         """Synthesizes data using CTGAN via Synthcity.
@@ -963,7 +964,8 @@ class RealGenerator(BaseGenerator):
         model_kwargs.pop("clipping_factor", None)
 
         syn = self._get_synthesizer("ctgan", **model_kwargs)
-        syn.fit(data)
+        _fit_kw = {"cond": cond} if cond is not None else {}
+        syn.fit(data, **_fit_kw)
         self.synthesizer = syn
         self.method = "ctgan"
         self.metadata = {"columns": data.columns.tolist()}
@@ -974,6 +976,11 @@ class RealGenerator(BaseGenerator):
             col = target_col
         elif custom_distributions:
             col = next(iter(custom_distributions))
+
+        if cond is not None and custom_distributions:
+            self.logger.warning(
+                "cond and custom_distributions both provided for CTGAN — cond ignored when generating per class."
+            )
 
         if col and col in data.columns:
             dist = custom_distributions[col]
@@ -986,7 +993,7 @@ class RealGenerator(BaseGenerator):
                 self.logger.info(
                     f"  Generating {n_cls} samples for class '{cls}'..."
                 )
-                cls_df = syn.generate(count=n_cls).dataframe()
+                cls_df = syn.generate(count=n_cls, random_state=self.random_state).dataframe()
                 cls_df[col] = cls
                 frames.append(cls_df)
             synth_df = (
@@ -995,10 +1002,13 @@ class RealGenerator(BaseGenerator):
                 .reset_index(drop=True)
             )
         else:
-            synth_df = syn.generate(count=n_samples).dataframe()
+            gen_kwargs = {"count": n_samples}
+            if cond is not None:
+                gen_kwargs["cond"] = cond
+            synth_df = syn.generate(**gen_kwargs, random_state=self.random_state).dataframe()
 
         return synth_df
-    
+
     def _synthesize_great(
         self,
         data: pd.DataFrame,
@@ -1008,19 +1018,19 @@ class RealGenerator(BaseGenerator):
     ) -> pd.DataFrame:
         """
         Synthesizes data using GREAT via Synthcity.
-        
+
         Args:
             data: Input DataFrame.
             n_samples: Number of synthetic samples to generate.
             target_col: Optional target column for latent differentiation.
             custom_distributions: Optional distributions to follow.
-           
+
         """
         self.logger.info("Starting GREAT synthesis via Synthcity...")
         self._patch_synthcity_encoder()  # Apply patch
         if "epochs" in model_kwargs:
             model_kwargs["n_iter"] = model_kwargs.pop("epochs")
-       
+
         syn = self._get_synthesizer("great", **model_kwargs)
         try:
             syn.fit(data)
@@ -1032,22 +1042,23 @@ class RealGenerator(BaseGenerator):
         self.method = "great"
         self.metadata = {"columns": data.columns.tolist()}
 
-       
-        synth_df = syn.generate(count=n_samples).dataframe()
+
+        synth_df = syn.generate(count=n_samples, random_state=self.random_state).dataframe()
 
         return synth_df
-    
+
     def _synthesize_tvae(
         self,
         data: pd.DataFrame,
         n_samples: int,
         target_col: Optional[str] = None,
         custom_distributions: Optional[Dict] = None,
+        cond: Optional[Any] = None,
         **model_kwargs,
     ) -> pd.DataFrame:
         """
         Synthesizes data using TVAE via Synthcity.
-        
+
         Args:
             data: Input DataFrame.
             n_samples: Number of synthetic samples to generate.
@@ -1067,8 +1078,9 @@ class RealGenerator(BaseGenerator):
         clipping_factor = model_kwargs.pop("clipping_factor", 0.1)
 
         syn = self._get_synthesizer("tvae", **model_kwargs)
+        _fit_kw = {"cond": cond} if cond is not None else {}
         try:
-            syn.fit(data)
+            syn.fit(data, **_fit_kw)
         except Exception as e:
             self.logger.error(f"TVAE training failed: {e}")
             return None
@@ -1084,11 +1096,11 @@ class RealGenerator(BaseGenerator):
                         n_samples=n_samples,
                         target_col=target_col,
                         differentiation_factor=differentiation_factor,
-                        method="tvae",   
+                        method="tvae",
                         clipping_mode=clipping_mode,
                         clipping_factor=clipping_factor)
         else:
-            # Custom distributions 
+            # Custom distributions
             col = None
             if custom_distributions and target_col and target_col in custom_distributions:
                 col = target_col
@@ -1103,7 +1115,7 @@ class RealGenerator(BaseGenerator):
                 frames = []
                 for cls, proportion in dist.items():
                     n_cls = max(1, round(n_samples * proportion))
-                    cls_df = syn.generate(count=n_cls).dataframe()
+                    cls_df = syn.generate(count=n_cls, random_state=self.random_state).dataframe()
                     cls_df[col] = cls
                     frames.append(cls_df)
                 synth_df = (
@@ -1112,38 +1124,41 @@ class RealGenerator(BaseGenerator):
                     .reset_index(drop=True)
                 )
             else:
-                synth_df = syn.generate(count=n_samples).dataframe()
-                
+                gen_kwargs = {"count": n_samples}
+                if cond is not None:
+                    gen_kwargs["cond"] = cond
+                synth_df = syn.generate(**gen_kwargs, random_state=self.random_state).dataframe()
+
         return synth_df
-    
+
     def _synthesize_conditional_drift(
         self,
-        data: pd.DataFrame, 
+        data: pd.DataFrame,
         n_samples: int,
-        time_col: Optional[str]  = None, 
-        n_stages: int = 5, 
+        time_col: Optional[str]  = None,
+        n_stages: int = 5,
         base_method: str = "tvae",
-        general_stages: Optional[List[int]] =  None, 
+        general_stages: Optional[List[int]] =  None,
         custom_distributions: Optional[dict] = None,
         **kwargs
     ) -> pd.DataFrame:
         stage_col = "__drift_stage__"
         df = data.copy()
-        
-        if time_col and time_col in df.columns: 
-            df[stage_col] = pd.cut(df[time_col], bins=n_stages, labels=False).astype(str)  
-        else: 
+
+        if time_col and time_col in df.columns:
+            df[stage_col] = pd.cut(df[time_col], bins=n_stages, labels=False).astype(str)
+        else:
            df[stage_col]  = pd.cut(np.arange(len(df)), bins=n_stages, labels=False).astype(str)
-        
+
         from synthcity.plugins import Plugins
         from synthcity.plugins.core.dataloader import GenericDataLoader
 
-        
+
         plugin_name = "tvae" if base_method =="tvae" else "ctgan"
         syn = Plugins().get(plugin_name, **kwargs)
-        
+
         syn.fit(GenericDataLoader(df))
-        
+
         self.synthesizer = syn
         self.method = "conditional_drift"
         self.metadata = {
@@ -1153,26 +1168,26 @@ class RealGenerator(BaseGenerator):
             "base_method" : base_method,
             "columns" : data.columns.tolist()
         }
-        
+
         stages_to_generate = (
             [str(s) for s in general_stages ]
-            if general_stages  is not None 
+            if general_stages  is not None
             else [str(s) for s in range(n_stages)]
         )
         sample_per_stage = max(1, n_samples // len(stages_to_generate))
         remainder = n_samples - sample_per_stage * len(stages_to_generate)
-        
+
         generated_parts = []
-        
+
         for i, _ in enumerate(stages_to_generate):
             count = sample_per_stage + (1 if i < remainder else 0)
-            part = syn.generate(count=count).dataframe()
+            part = syn.generate(count=count, random_state=self.random_state).dataframe()
             generated_parts.append(part)
-            
+
         result = pd.concat(generated_parts, ignore_index=True)
-        
+
         result = result.drop(columns=[stage_col])
-        if custom_distributions: 
+        if custom_distributions:
             col = next(iter(custom_distributions), None)
             if col and col in data.columns:
                 dist = custom_distributions[col]
@@ -1182,7 +1197,7 @@ class RealGenerator(BaseGenerator):
                 frames = []
                 for cls, proportion in dist.items():
                     n_cls = max(1, round(n_samples * proportion))
-                    cls_df = syn.generate(count=n_cls).dataframe()
+                    cls_df = syn.generate(count=n_cls, random_state=self.random_state).dataframe()
                     cls_df[col] = cls
                     frames.append(cls_df)
                 result = (
@@ -1190,8 +1205,8 @@ class RealGenerator(BaseGenerator):
                     .sample(frac=1, random_state=self.random_state)
                     .reset_index(drop=True)
                 )
-           
-                
+
+
         return result
     def _synthesize_rtvae(
         self,
@@ -1199,11 +1214,12 @@ class RealGenerator(BaseGenerator):
         n_samples: int,
         custom_distributions: Optional[Dict] = None,
         target_col: Optional[str] = None,
+        cond: Optional[Any] = None,
         **model_kwargs,
     ) -> pd.DataFrame:
         """
         Synthesizes data using RTVAE via Synthcity.
-        
+
         Args:
             data: Input DataFrame.
             n_samples: Number of synthetic samples to generate.
@@ -1224,8 +1240,9 @@ class RealGenerator(BaseGenerator):
         clipping_factor = model_kwargs.pop("clipping_factor", 0.1)
 
         syn = self._get_synthesizer("rtvae", **model_kwargs)
+        _fit_kw = {"cond": cond} if cond is not None else {}
         try:
-            syn.fit(data)
+            syn.fit(data, **_fit_kw)
         except Exception as e:
             self.logger.error(f"RTVAE training failed: {e}")
             return None
@@ -1241,11 +1258,11 @@ class RealGenerator(BaseGenerator):
                         n_samples=n_samples,
                         target_col=target_col,
                         differentiation_factor=differentiation_factor,
-                        method="rtvae",  
+                        method="rtvae",
                         clipping_mode=clipping_mode,
                         clipping_factor=clipping_factor)
         else:
-            # Custom distributions 
+            # Custom distributions
             col = None
             if custom_distributions and target_col and target_col in custom_distributions:
                 col = target_col
@@ -1260,7 +1277,7 @@ class RealGenerator(BaseGenerator):
                 frames = []
                 for cls, proportion in dist.items():
                     n_cls = max(1, round(n_samples * proportion))
-                    cls_df = syn.generate(count=n_cls).dataframe()
+                    cls_df = syn.generate(count=n_cls, random_state=self.random_state).dataframe()
                     cls_df[col] = cls
                     frames.append(cls_df)
                 synth_df = (
@@ -1269,10 +1286,13 @@ class RealGenerator(BaseGenerator):
                     .reset_index(drop=True)
                 )
             else:
-                synth_df = syn.generate(count=n_samples).dataframe()
-            
+                gen_kwargs = {"count": n_samples}
+                if cond is not None:
+                    gen_kwargs["cond"] = cond
+                synth_df = syn.generate(**gen_kwargs, random_state=self.random_state).dataframe()
+
         return synth_df
-    
+
     def apply_latent_differentiation(
         self,
         syn: Any,
@@ -1285,7 +1305,7 @@ class RealGenerator(BaseGenerator):
     ) -> pd.DataFrame:
         """
         Unified implementation of latent space differentiation for TVAE and scVI.
-        
+
         Follows a 5-step process:
         1. Generate latent space z(d) for samples.
         2. Calculate centers of mass (centroids) for cases (cmca) and controls (cmco).
@@ -1293,10 +1313,9 @@ class RealGenerator(BaseGenerator):
         4. Generate synthetic latent z'(d) = z(d) + a * c.
         5. Decode z'(d) and apply flexible clipping.
         """
-        import torch
         import numpy as np
         self.logger.info(f"Applying unified latent differentiation for {method} (factor: {differentiation_factor})")
-        
+
         clipping_mode = kwargs.get("clipping_mode", "strict")
         clipping_factor = kwargs.get("clipping_factor", None)
         clip_min = kwargs.get("clip_min", None)
@@ -1355,7 +1374,7 @@ class RealGenerator(BaseGenerator):
                 control_val = unique_classes[0]
                 case_val = unique_classes[1]
             else:
-                return syn.generate(count=n_samples).dataframe()
+                return syn.generate(count=n_samples, random_state=self.random_state).dataframe()
 
             # Step 2: Calculate Centroids
             if method == "scvi" and hasattr(data, "obs"):
@@ -1487,8 +1506,8 @@ class RealGenerator(BaseGenerator):
             # Sample/Match size
             if len(synth_df) != n_samples:
                 synth_df = synth_df.sample(
-                    n=n_samples, 
-                    replace=(n_samples > len(synth_df)), 
+                    n=n_samples,
+                    replace=(n_samples > len(synth_df)),
                     random_state=self.random_state
                 ).reset_index(drop=True)
 
@@ -1532,7 +1551,7 @@ class RealGenerator(BaseGenerator):
 
             return synth_df
 
-        except ValueError as e:
+        except ValueError:
             raise
         except Exception as e:
             self.logger.error(f"Unified differentiation failed for {method}: {e}. Falling back to standard generation.")
@@ -1541,7 +1560,8 @@ class RealGenerator(BaseGenerator):
                 self.logger.warning("scVI fallback: generating from standard latent prior (no differentiation).")
                 import scvi as _scvi_mod  # noqa: F401
                 n_latent = syn.module.n_latent
-                latent_samples = np.random.randn(n_samples, n_latent).astype(np.float32)
+                rng = np.random.default_rng(self.random_state)
+                latent_samples = rng.standard_normal((n_samples, n_latent)).astype(np.float32)
                 latent_tensor = torch.tensor(latent_samples).to(syn.device)
                 mean_lib = float(np.log(10000))
                 library_tensor = torch.full((n_samples, 1), mean_lib, dtype=torch.float32).to(syn.device)
@@ -1555,7 +1575,7 @@ class RealGenerator(BaseGenerator):
                     vals = px_dist.sample().cpu().numpy() if hasattr(px_dist, "sample") else px_dist.mean.cpu().numpy()
                 col_names = syn.adata.var_names.tolist()
                 return pd.DataFrame(vals, columns=col_names)
-            return syn.generate(count=n_samples).dataframe()
+            return syn.generate(count=n_samples, random_state=self.random_state).dataframe()
 
 
     def _synthesize_bn(
@@ -1601,40 +1621,40 @@ class RealGenerator(BaseGenerator):
         self.synthesizer = syn
         self.method = "bayesian_network"
         self.metadata = {"columns": data.columns.tolist()}
-        return syn.generate(count=n_samples).dataframe()
+        return syn.generate(count=n_samples, random_state=self.random_state).dataframe()
 
-    
+
     def _synthesize_windowed_copula(
         self,
-        data: pd.DataFrame, 
-        n_samples: int, 
+        data: pd.DataFrame,
+        n_samples: int,
         time_col: Optional[str] = None,
-        n_windows: int = 5, 
+        n_windows: int = 5,
         generate_at: Optional[List[float]] = None,
         **kwargs
-    ) -> pd.DataFrame: 
-        
+    ) -> pd.DataFrame:
+
         numeric_cols = data.select_dtypes(include=[np.number]).columns.tolist()
-        if not numeric_cols: 
+        if not numeric_cols:
             raise ValueError("Windowed copula required at least one numeric column")
         df = data.sort_values(time_col)[numeric_cols].copy() if time_col and time_col in data.columns else data[numeric_cols].copy()
         windowed_size = len(df) // n_windows
         windows = [df.iloc[i * windowed_size:(i + 1) * windowed_size] for i in range(n_windows)]
         windows[-1] = df.iloc[(n_windows -1) * windowed_size:]
-        
+
         from copulae import GaussianCopula
         from sklearn.preprocessing import MinMaxScaler
-        
+
         fitted_copulas = []
         scalers= []
-        for window_df in windows: 
+        for window_df in windows:
             scaler = MinMaxScaler()
             scaled = scaler.fit_transform(window_df.values)
             cop = GaussianCopula(dim=len(numeric_cols))
             cop.fit(scaled)
             fitted_copulas.append(cop)
             scalers.append(scaler)
-            
+
         if generate_at is None:
             generate_at = [i / max(n_windows - 1, 1) for i in range(n_windows)]
 
@@ -1663,7 +1683,7 @@ class RealGenerator(BaseGenerator):
             parts.append(pd.concat([part_low, part_high], ignore_index=True))
 
         result = pd.concat(parts, ignore_index=True).head(n_samples).reset_index(drop=True)
-        
+
         self.synthesizer = fitted_copulas
         self.method = "windowed_copula"
         self.metadata = {
@@ -1673,9 +1693,9 @@ class RealGenerator(BaseGenerator):
             "scalers" : scalers,
             "columns": data.columns.tolist()
         }
-        
+
         return result
-    
+
     def _synthesize_copula(
         self,
         data: pd.DataFrame,
@@ -2008,7 +2028,7 @@ class RealGenerator(BaseGenerator):
 
         # Generate
         self.logger.info(f"Generating {n_samples} synthetic samples...")
-        synth = plugin.generate(count=n_samples)
+        synth = plugin.generate(count=n_samples, random_state=self.random_state)
         synth_df = synth.dataframe()
 
         self.logger.info(
@@ -2159,7 +2179,7 @@ class RealGenerator(BaseGenerator):
 
         # Generate
         self.logger.info(f"Generating {n_samples} synthetic sequences...")
-        synth = plugin.generate(count=n_samples)
+        synth = plugin.generate(count=n_samples, random_state=self.random_state)
         synth_df = synth.dataframe()
 
         self.logger.info(
@@ -2302,7 +2322,7 @@ class RealGenerator(BaseGenerator):
 
         # Generate
         self.logger.info(f"Generating {n_samples} synthetic sequences...")
-        synth = plugin.generate(count=n_samples)
+        synth = plugin.generate(count=n_samples, random_state=self.random_state)
         synth_df = synth.dataframe()
 
         self.logger.info(
@@ -2431,13 +2451,13 @@ class RealGenerator(BaseGenerator):
         self.synthesizer = plugin
         self.method = "fflows"
         self.logger.info(f"Generating {n_samples} synthetic sequences...")
-        synth = plugin.generate(count=n_samples)
+        synth = plugin.generate(count=n_samples, random_state=self.random_state)
         synth_df = synth.dataframe()
         self.logger.info(
             f"FourierFlows synthesis complete. Generated {len(synth_df)} samples."
         )
         return synth_df
-    
+
     def _synthesize_kde(
         self,
         data: pd.DataFrame,
@@ -2683,10 +2703,12 @@ class RealGenerator(BaseGenerator):
 
             if use_latent_sampling:
                 latent = scanvi_model.get_latent_representation(indices=cell_indices)
-                sample_idx = np.random.choice(len(latent), size=n_cls, replace=True)
+                rng = np.random.default_rng(self.random_state)
+                sample_idx = rng.choice(len(latent), size=n_cls, replace=True)
                 latent_samples = latent[sample_idx].astype(np.float32)
             else:
-                latent_samples = np.random.randn(n_cls, n_latent).astype(np.float32)
+                rng = np.random.default_rng(self.random_state)
+                latent_samples = rng.standard_normal((n_cls, n_latent)).astype(np.float32)
 
             with torch.no_grad():
                 latent_tensor = torch.tensor(latent_samples).to(scanvi_model.device)
@@ -2843,16 +2865,16 @@ class RealGenerator(BaseGenerator):
         # Separate parameters for model initialization and training
         n_latent = kwargs.get("n_latent", 30)
         model_setup_params = [
-            "n_hidden", "n_latent", "n_layers", "dropout_rate", 
-            "dispersion", "gene_likelihood", "use_observed_lib_size", 
+            "n_hidden", "n_latent", "n_layers", "dropout_rate",
+            "dispersion", "gene_likelihood", "use_observed_lib_size",
             "latent_distribution"
         ]
-        
+
         model_init_kwargs = {
             "n_latent": n_latent,
             "n_layers": kwargs.get("n_layers", 1),
         }
-        
+
         # Pull any other model setup params from kwargs
         for param in model_setup_params:
             if param in kwargs:
@@ -2883,7 +2905,7 @@ class RealGenerator(BaseGenerator):
         else:
             self.logger.info("Setting up unsupervised scVI base...")
             scvi.model.SCVI.setup_anndata(adata_to_train)
-            
+
         model = scvi.model.SCVI(adata_to_train, **model_init_kwargs)
 
         # Map training parameters
@@ -2891,46 +2913,46 @@ class RealGenerator(BaseGenerator):
         early_stopping = kwargs.get("early_stopping", True)
 
         self.logger.info(f"Training scVI model with {epochs} epochs (Early stopping: {early_stopping})...")
-        
+
         # Comprehensive list of training parameters for scVI (Trainer parameters)
         train_params = [
-            "accelerator", "devices", "train_size", "validation_size", 
-            "shuffle_set_split", "load_sparse_tensor", "batch_size", 
-            "early_stopping", "datasplitter_kwargs", "plan_config", 
+            "accelerator", "devices", "train_size", "validation_size",
+            "shuffle_set_split", "load_sparse_tensor", "batch_size",
+            "early_stopping", "datasplitter_kwargs", "plan_config",
             "plan_kwargs", "datamodule", "trainer_config"
         ]
-        
+
         train_kwargs = {
             "max_epochs": epochs,
             "early_stopping": early_stopping,
         }
-        
+
         # Add early_stopping_patience if provided in kwargs
         if "early_stopping_patience" in kwargs:
             train_kwargs["early_stopping_patience"] = kwargs["early_stopping_patience"]
         if "check_val_every_n_epoch" in kwargs:
             train_kwargs["check_val_every_n_epoch"] = kwargs["check_val_every_n_epoch"]
-        
+
         # Add any user-provided parameters that match scVI training signature
         for param in train_params:
             if param in kwargs:
                 train_kwargs[param] = kwargs[param]
-        
+
         # Generation-specific parameters that should NEVER go to model.init or model.train
         gen_params = [
-            "differentiation_factor", "use_scanvi", 
+            "differentiation_factor", "use_scanvi",
             "use_contrastivevi", "scanvi_epochs", "scanvi_unlabeled_category",
             "use_latent_sampling", "preserve_library_size", "epochs", "max_epochs"
         ]
-        
-        # Also allow any additional kwargs to pass through to train(), 
+
+        # Also allow any additional kwargs to pass through to train(),
         # BUT EXCLUDE those used for model initialization OR generation logic to avoid TypeErrors.
         for k, v in kwargs.items():
-            if (k not in train_kwargs and 
-                k not in model_setup_params and 
+            if (k not in train_kwargs and
+                k not in model_setup_params and
                 k not in gen_params):
                 train_kwargs[k] = v
-                
+
         try:
             model.train(**train_kwargs)
             self._report_scvi_history(model)
@@ -2962,11 +2984,12 @@ class RealGenerator(BaseGenerator):
             self.logger.info("Using latent sampling for more realistic generation...")
             # Use get_latent_representation to get the full latent space
             orig_latent = model.get_latent_representation()
-            
+
             # Sample indices to use for generation
-            indices = np.random.choice(len(orig_latent), size=n_samples, replace=True)
+            rng = np.random.default_rng(self.random_state)
+            indices = rng.choice(len(orig_latent), size=n_samples, replace=True)
             latent_samples = orig_latent[indices].astype(np.float32)
-            
+
             synthetic_metadata = None
             if target_col and target_col in (
                 adata_to_train.obs.columns
@@ -2978,13 +3001,14 @@ class RealGenerator(BaseGenerator):
             # latent_samples = np.random.randn(n_samples, n_latent).astype(np.float32)
             # Fetch n_latent from model
             n_latent = model.module.n_latent
-            latent_samples = np.random.randn(n_samples, n_latent).astype(np.float32)
+            rng = np.random.default_rng(self.random_state)
+            latent_samples = rng.standard_normal((n_samples, n_latent)).astype(np.float32)
             synthetic_metadata = None
             indices = np.arange(n_samples) # Dummy indices if not latent sampling
 
         with torch.no_grad():
             latent_tensor = torch.tensor(latent_samples).to(model.device)
-            
+
             if use_latent_sampling and kwargs.get('preserve_library_size', True):
                 if hasattr(adata_to_train.X, 'toarray'):
                     orig_lib_size = np.sum(adata_to_train.X.toarray(), axis=1)
@@ -2992,7 +3016,7 @@ class RealGenerator(BaseGenerator):
                     orig_lib_size = np.sum(adata_to_train.X, axis=1)
                 if hasattr(orig_lib_size, 'A1'):
                      orig_lib_size = orig_lib_size.A1
-                
+
                 orig_log_lib = np.log(orig_lib_size + 1e-8)
                 sampled_log_lib = orig_log_lib[indices]
                 library_tensor = torch.tensor(
@@ -3009,7 +3033,7 @@ class RealGenerator(BaseGenerator):
                 ).to(model.device)
 
             batch_index = torch.zeros(n_samples, 1, dtype=torch.long).to(model.device)
-            
+
             # Handle labels for gene-label dispersion
             y_tensor = None
             if getattr(model.module, "dispersion", "gene") == "gene-label":
@@ -3018,7 +3042,7 @@ class RealGenerator(BaseGenerator):
                     cat_mapping = label_registry.categorical_mapping
                     label_map = {str(cat): i for i, cat in enumerate(cat_mapping)}
                     y_tensor = torch.tensor(
-                        [label_map[str(m)] for m in synthetic_metadata], 
+                        [label_map[str(m)] for m in synthetic_metadata],
                         dtype=torch.long
                     ).unsqueeze(1).to(model.device)
                 except Exception as e:
@@ -3075,7 +3099,7 @@ class RealGenerator(BaseGenerator):
                     if hasattr(data, "obs")
                     else data[target_col].values
                 )
-                synth_df[target_col] = np.random.choice(
+                synth_df[target_col] = np.random.default_rng(self.random_state).choice(
                     source_metadata, size=n_samples, replace=True
                 )
 
@@ -3112,8 +3136,8 @@ class RealGenerator(BaseGenerator):
         )
 
         try:
-            from gears import PertData, GEARS
             import anndata
+            from gears import GEARS, PertData
         except ImportError:
             raise ImportError(
                 "gears and anndata are required for GEARS synthesis. "
@@ -3176,8 +3200,9 @@ class RealGenerator(BaseGenerator):
 
         try:
             # Create temporary PertData object
-            import tempfile
             import os
+            import tempfile
+
             from scipy import sparse
 
             # GEARS expects sparse matrix for co-expression calculation
@@ -3254,12 +3279,13 @@ class RealGenerator(BaseGenerator):
                     pred_values = np.array(predictions)
 
                 # Generate n_samples by repeating/sampling predictions
+                _rng = np.random.default_rng(self.random_state)
                 if len(pred_values) >= n_samples:
-                    indices = np.random.choice(
+                    indices = _rng.choice(
                         len(pred_values), size=n_samples, replace=False
                     )
                 else:
-                    indices = np.random.choice(
+                    indices = _rng.choice(
                         len(pred_values), size=n_samples, replace=True
                     )
 
@@ -3268,7 +3294,7 @@ class RealGenerator(BaseGenerator):
 
                 # Add metadata back
                 if target_col and target_col in adata.obs.columns:
-                    synth_df[target_col] = np.random.choice(
+                    synth_df[target_col] = _rng.choice(
                         adata.obs[target_col], size=n_samples, replace=True
                     )
 
@@ -3492,8 +3518,9 @@ class RealGenerator(BaseGenerator):
                         classes = model.classes_
 
                         # Sample for each row
+                        _rng = np.random.default_rng(self.random_state)
                         y_synth_pred = np.array(
-                            [np.random.choice(classes, p=p) for p in probs]
+                            [_rng.choice(classes, p=p) for p in probs]
                         )
                     else:
                         # Regression, balancing via resampling, or fallback
@@ -3621,8 +3648,8 @@ class RealGenerator(BaseGenerator):
 
             try:
                 from imblearn.over_sampling import RandomOverSampler
-                from imblearn.under_sampling import RandomUnderSampler
                 from imblearn.pipeline import Pipeline as ImblearnPipeline
+                from imblearn.under_sampling import RandomUnderSampler
             except ImportError:
                 # Fallback if imblearn not available? Or raise.
                 self.logger.warning(
@@ -3677,7 +3704,7 @@ class RealGenerator(BaseGenerator):
 
         def model_factory(is_classification):
             try:
-                from sklearn.tree import DecisionTreeRegressor, DecisionTreeClassifier
+                from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
             except ImportError:
                 raise ImportError("scikit-learn is required for CART synthesis.")
 
@@ -3753,15 +3780,15 @@ class RealGenerator(BaseGenerator):
         n_samples: int,
         n_components: int = 4,
         covariance_type: str = "full",
-        n_iter: int = 100, 
+        n_iter: int = 100,
         **kwargs
     ) -> pd.DataFrame:
         from hmmlearn import hmm
         numeric_cols = data.select_dtypes(include=[np.number]).columns.tolist()
-        if not numeric_cols: 
+        if not numeric_cols:
             raise ValueError("hmm requires at least one numeric column. ")
-        
-        from sklearn.preprocessing import StandardScaler 
+
+        from sklearn.preprocessing import StandardScaler
         scaler = StandardScaler()
         X = scaler.fit_transform(data[numeric_cols].values)
         model = hmm.GaussianHMM(
@@ -3801,8 +3828,8 @@ class RealGenerator(BaseGenerator):
         def model_factory(is_classification):
             try:
                 from sklearn.ensemble import (
-                    RandomForestRegressor,
                     RandomForestClassifier,
+                    RandomForestRegressor,
                 )
             except ImportError:
                 raise ImportError("scikit-learn is required for RF synthesis.")
@@ -3941,6 +3968,7 @@ class RealGenerator(BaseGenerator):
         n_samples: int,
         target_col: Optional[str] = None,
         custom_distributions: Optional[Dict] = None,
+        cond: Optional[Any] = None,
         **model_kwargs,
     ) -> pd.DataFrame:
         """
@@ -3964,8 +3992,9 @@ class RealGenerator(BaseGenerator):
             model_kwargs["n_iter"] = model_kwargs.pop("epochs")
 
         syn = self._get_synthesizer("dpgan", **model_kwargs)
+        _fit_kw = {"cond": cond} if cond is not None else {}
         try:
-            syn.fit(data)
+            syn.fit(data, **_fit_kw)
         except Exception as e:
             self.logger.error(f"DPGAN training failed: {e}")
             return None
@@ -3974,7 +4003,10 @@ class RealGenerator(BaseGenerator):
         self.method = "dpgan"
         self.metadata = {"columns": data.columns.tolist()}
 
-        synth_df = syn.generate(count=n_samples).dataframe()
+        gen_kwargs = {"count": n_samples}
+        if cond is not None:
+            gen_kwargs["cond"] = cond
+        synth_df = syn.generate(**gen_kwargs, random_state=self.random_state).dataframe()
 
         if custom_distributions:
             synth_df = self._apply_postprocess_distribution(
@@ -3988,6 +4020,7 @@ class RealGenerator(BaseGenerator):
         n_samples: int,
         target_col: Optional[str] = None,
         custom_distributions: Optional[Dict] = None,
+        cond: Optional[Any] = None,
         **model_kwargs,
     ) -> pd.DataFrame:
         """
@@ -4014,8 +4047,9 @@ class RealGenerator(BaseGenerator):
             model_kwargs["n_iter"] = model_kwargs.pop("epochs")
 
         syn = self._get_synthesizer("pategan", **model_kwargs)
+        _fit_kw = {"cond": cond} if cond is not None else {}
         try:
-            syn.fit(data)
+            syn.fit(data, **_fit_kw)
         except Exception as e:
             self.logger.error(f"PATE-GAN training failed: {e}")
             return None
@@ -4024,7 +4058,10 @@ class RealGenerator(BaseGenerator):
         self.method = "pategan"
         self.metadata = {"columns": data.columns.tolist()}
 
-        synth_df = syn.generate(count=n_samples).dataframe()
+        gen_kwargs = {"count": n_samples}
+        if cond is not None:
+            gen_kwargs["cond"] = cond
+        synth_df = syn.generate(**gen_kwargs, random_state=self.random_state).dataframe()
 
         if custom_distributions:
             synth_df = self._apply_postprocess_distribution(
@@ -4077,16 +4114,17 @@ class RealGenerator(BaseGenerator):
         result = data.copy()
         numeric_cols = data.select_dtypes(include=np.number).columns.tolist()
         categorical_cols = data.select_dtypes(exclude=np.number).columns.tolist()
+        _rng = np.random.default_rng(self.random_state)
 
         # --- Numeric columns ---
         for col in numeric_cols:
             if mechanism == "laplace":
                 scale = numeric_sensitivity / epsilon
-                noise = np.random.laplace(0, scale, size=len(data))
+                noise = _rng.laplace(0, scale, size=len(data))
             else:
                 # Gaussian mechanism
                 sigma = numeric_sensitivity * np.sqrt(2 * np.log(1.25 / delta)) / epsilon
-                noise = np.random.normal(0, sigma, size=len(data))
+                noise = _rng.normal(0, sigma, size=len(data))
             result[col] = data[col] + noise
 
         # --- Categorical columns: Randomized Response ---
@@ -4103,7 +4141,7 @@ class RealGenerator(BaseGenerator):
 
             # Vectorized randomized response: flip rows where random draw >= p
             col_arr = data[col].to_numpy()
-            keep_mask = np.random.random(len(col_arr)) < p
+            keep_mask = _rng.random(len(col_arr)) < p
             new_vals = col_arr.copy()
             flip_positions = np.where(~keep_mask)[0]
             if len(flip_positions) > 0:
@@ -4111,7 +4149,7 @@ class RealGenerator(BaseGenerator):
                     sub_pos = flip_positions[col_arr[flip_positions] == uval]
                     others = [c for c in categories if c != uval]
                     if others:
-                        new_vals[sub_pos] = np.random.choice(others, size=len(sub_pos))
+                        new_vals[sub_pos] = _rng.choice(others, size=len(sub_pos))
             result[col] = new_vals
 
         self.logger.info("Privatization complete.")
@@ -4120,7 +4158,7 @@ class RealGenerator(BaseGenerator):
     def generate_custom(
         self,
         data: pd.DataFrame,
-        model, 
+        model,
         n_samples: int,
         fit_fn=None,
         generate_fn=None,
@@ -4128,10 +4166,10 @@ class RealGenerator(BaseGenerator):
         method_name: str = "custom",
         columns: Optional[List[str]] = None
     ) -> pd.DataFrame:
-         
+
         from calm_data_generator.generators.tabular.CustomPluginAdapter import CustomPluginAdapter
-        
-        
+
+
         adapter = CustomPluginAdapter(
             model= model,
             fit_fn= fit_fn,
@@ -4140,20 +4178,20 @@ class RealGenerator(BaseGenerator):
             columns= columns or data.columns.to_list(),
             method_name= method_name
         )
-        
+
         self.logger.info(f"Training custom model {method_name}")
-        
+
         adapter.fit(data)
-        
-        self.synthesizer = adapter 
-        self.method = method_name 
+
+        self.synthesizer = adapter
+        self.method = method_name
         self.metadata = {"columns": data.columns.tolist()}
 
-        
+
         self.logger.info(f"Generating {n_samples} with method {method_name}")
-        
+
         return adapter.generate(n_samples)
-    
+
     def generate(
         self,
         data: Optional[Union[pd.DataFrame, Any]] = None,
@@ -4175,6 +4213,7 @@ class RealGenerator(BaseGenerator):
         drift_injection_config: Optional[List[Union[Dict, DriftConfig]]] = None,
         dynamics_config: Optional[Dict] = None,
         constraints: Optional[List[Dict]] = None,
+        cond: Optional[Any] = None,
         adversarial_validation: bool = False,
         report_config: Optional[Union[ReportConfig, Dict]] = None,
         **kwargs,
@@ -4182,7 +4221,7 @@ class RealGenerator(BaseGenerator):
         # BUGFIX: Reset history and active state at the start of each generation
         self.training_history = {}
         self._is_training_active = True
-        
+
         # Ensure reporter is fresh and respects the current minimal mode
         self.reporter = QualityReporter(minimal=self.minimal_report)
         """
@@ -4202,7 +4241,7 @@ class RealGenerator(BaseGenerator):
             save_dataset (bool): If True, saves the generated dataset to a CSV file.
             drift_injection_config (Optional[List[Dict]]): List of drift injection configurations.
             dynamics_config (Optional[Dict]): Configuration for dynamics injection (feature evolution, target construction).
-            **kwargs: Hyperparameters for the models. 
+            **kwargs: Hyperparameters for the models.
                 Common v1.2.0 parameters:
                 - differentiation_factor (float): Enhances class separation in latent space (TVAE/scVI).
                 - clipping_mode (str): 'strict' (default), 'permissive', or 'none' for output range control.
@@ -4303,7 +4342,7 @@ class RealGenerator(BaseGenerator):
             data = df
 
         self._validate_method(method)
-        
+
         # Validate differentiation and clipping parameters for unsupported methods
         if kwargs.get("differentiation_factor", 0.0) > 0 and method not in ["tvae", "rtvae", "scvi"]:
             self.logger.warning(
@@ -4311,7 +4350,7 @@ class RealGenerator(BaseGenerator):
                 f"It will be ignored for method '{method}'."
             )
         if kwargs.get("clipping_mode", "strict") != "none" and method not in ["tvae", "scvi", "ctgan"]:
-            # Note: ctgan handles its own clipping or ignores it gracefully, but we primarily 
+            # Note: ctgan handles its own clipping or ignores it gracefully, but we primarily
             # target the new logic for tvae/scvi.
             pass
 
@@ -4385,6 +4424,7 @@ class RealGenerator(BaseGenerator):
                 n_samples,
                 target_col=target_col,
                 custom_distributions=custom_distributions,
+                cond=cond,
                 **kwargs,
             )
         elif method == "great":
@@ -4400,6 +4440,7 @@ class RealGenerator(BaseGenerator):
                 n_samples,
                 target_col=target_col,
                 custom_distributions=custom_distributions,
+                cond=cond,
                 **(kwargs or {}),
             )
         elif method == "pategan":
@@ -4408,6 +4449,7 @@ class RealGenerator(BaseGenerator):
                 n_samples,
                 target_col=target_col,
                 custom_distributions=custom_distributions,
+                cond=cond,
                 **(kwargs or {}),
             )
         elif method == "tvae":
@@ -4416,20 +4458,22 @@ class RealGenerator(BaseGenerator):
                 n_samples,
                 target_col=target_col,
                 custom_distributions=custom_distributions,
+                cond=cond,
                 **kwargs,
             )
-        elif method == "rtvae": 
+        elif method == "rtvae":
             synth = self._synthesize_rtvae(
                 data,
                 n_samples,
                 target_col=target_col,
                 custom_distributions=custom_distributions,
+                cond=cond,
                 **kwargs,
             )
-        elif method == "conditional_drift": 
+        elif method == "conditional_drift":
             synth = self._synthesize_conditional_drift(
-                data = data, 
-                n_samples = n_samples, 
+                data = data,
+                n_samples = n_samples,
                 time_col = kwargs.get("time_col") if kwargs else None,
                 n_stages = kwargs.get("n_stages", 5) if kwargs else 5,
                 general_stages = kwargs.get("general_stages") if kwargs else None,
@@ -4453,11 +4497,11 @@ class RealGenerator(BaseGenerator):
                 target_col=target_col,
                 custom_distributions=custom_distributions,
             )
-        elif method == "kde": 
+        elif method == "kde":
             synth = self._synthesize_kde(
                 data,
                 n_samples,
-                target_col=target_col, 
+                target_col=target_col,
                 custom_distributions=custom_distributions,
                 **(kwargs or {}),
             )
@@ -4479,7 +4523,7 @@ class RealGenerator(BaseGenerator):
                 **{k: v for k, v in kwargs.items() if k not in {"n_components", "covariance_type", "n_iter"}}
             )
 
-        elif method == "xgboost": 
+        elif method == "xgboost":
             synth = self._synthesize_xgboost(
                 data,
                 n_samples,
@@ -4604,49 +4648,67 @@ class RealGenerator(BaseGenerator):
             self.logger.info(
                 f"Applying {len(constraints)} constraints to generated data..."
             )
-            # Simple Rejection Sampling or Filtering
-            # constraint format: {'col': 'Age', 'op': '>', 'val': 18}
+
+            def _apply_constraints_mask(df: pd.DataFrame) -> pd.Series:
+                mask = pd.Series(True, index=df.index)
+                for const in constraints:
+                    col = const.get("col")
+                    op = const.get("op")
+                    val = const.get("val")
+                    if col not in df.columns:
+                        self.logger.warning(f"Constraint column '{col}' not found. Skipping.")
+                        continue
+                    if op == ">":
+                        mask &= df[col] > val
+                    elif op == "<":
+                        mask &= df[col] < val
+                    elif op == ">=":
+                        mask &= df[col] >= val
+                    elif op == "<=":
+                        mask &= df[col] <= val
+                    elif op == "==":
+                        mask &= df[col] == val
+                    elif op == "!=":
+                        mask &= df[col] != val
+                return mask
 
             initial_count = len(synth)
-            valid_mask = pd.Series(True, index=synth.index)
-
-            for const in constraints:
-                col = const.get("col")
-                op = const.get("op")
-                val = const.get("val")
-
-                if col not in synth.columns:
-                    self.logger.warning(
-                        f"Constraint column '{col}' not found. Skipping."
-                    )
-                    continue
-
-                if op == ">":
-                    valid_mask &= synth[col] > val
-                elif op == "<":
-                    valid_mask &= synth[col] < val
-                elif op == ">=":
-                    valid_mask &= synth[col] >= val
-                elif op == "<=":
-                    valid_mask &= synth[col] <= val
-                elif op == "==":
-                    valid_mask &= synth[col] == val
-                elif op == "!=":
-                    valid_mask &= synth[col] != val
-
-            synth = synth[valid_mask].reset_index(drop=True)
-            final_count = len(synth)
-            dropped = initial_count - final_count
+            synth = synth[_apply_constraints_mask(synth)].reset_index(drop=True)
+            dropped = initial_count - len(synth)
 
             if dropped > 0:
                 self.logger.warning(
-                    f"Constraints filtering dropped {dropped} rows ({dropped / initial_count:.1%}). consider loosening constraints or improving model."
+                    f"Constraints filtering dropped {dropped} rows ({dropped / initial_count:.1%})."
                 )
-                # Optional: Retry loop could go here (generate more to compensate)
-                if len(synth) < n_samples:
-                    self.logger.info(
-                        "Regenerating to fill filtered rows not implemented yet in this pass."
-                    )  # TODO: Add loop
+
+            # Retry loop: regenerate until n_samples satisfied or max retries reached
+            _MAX_RETRIES = 5
+            _retry = 0
+            while len(synth) < n_samples and _retry < _MAX_RETRIES and self.synthesizer is not None:
+                _retry += 1
+                needed = n_samples - len(synth)
+                oversample = max(needed * 2, 64)
+                self.logger.info(
+                    f"Constraints retry {_retry}/{_MAX_RETRIES}: generating {oversample} extra rows to fill {needed} missing."
+                )
+                try:
+                    gen_kwargs = {"count": oversample}
+                    if cond is not None:
+                        gen_kwargs["cond"] = cond
+                    extra = self.synthesizer.generate(**gen_kwargs).dataframe()
+                    extra = extra[_apply_constraints_mask(extra)].reset_index(drop=True)
+                    synth = pd.concat([synth, extra], ignore_index=True)
+                except Exception as e:
+                    self.logger.warning(f"Constraints retry {_retry} failed: {e}")
+                    break
+
+            if len(synth) < n_samples:
+                self.logger.warning(
+                    f"Could only generate {len(synth)}/{n_samples} rows satisfying constraints after {_retry} retries. "
+                    "Consider loosening constraints or improving the model."
+                )
+            else:
+                synth = synth.iloc[:n_samples].reset_index(drop=True)
 
         if synth is not None:
             self.logger.info(f"Successfully synthesized {len(synth)} samples.")
