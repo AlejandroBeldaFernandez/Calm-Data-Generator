@@ -642,6 +642,250 @@ class RealGenerator(BaseGenerator):
 
         return None
 
+    def encode_to_latent(
+        self,
+        data,
+        target_col: Optional[str] = None,
+    ) -> "torch.Tensor":
+        """
+        Encodes ``data`` into the model's latent space, handling the full
+        preprocessing pipeline for each supported method.
+
+        - **tvae / rtvae**: runs TabularEncoder → VAE encoder → returns ``mu``
+          (mean of the approximate posterior).  The TabularEncoder was fitted
+          on the *complete* training DataFrame (including ``target_col``), so
+          ``data`` must contain the same columns, in the same order, as the
+          training data — ``target_col`` included.
+        - **scvi / scanvi**: calls ``model.get_latent_representation()`` and
+          returns the result as a float32 tensor.
+
+        Unlike :meth:`get_encoder`, which exposes the raw PyTorch module, this
+        method handles the method-specific preprocessing automatically. Use it
+        when implementing external drift analyses that need latent
+        representations for both TVAE and SCVI without rewriting the encoding
+        pipeline each time.
+
+        Parameters
+        ----------
+        data:
+            - TVAE/RTVAE: a :class:`pandas.DataFrame` with **all** columns
+              used during training (including ``target_col``).
+            - SCVI/SCANVI: a :class:`pandas.DataFrame` *or* an
+              ``AnnData`` object whose ``var_names`` match the training genes.
+        target_col:
+            Label column used to build the optional conditioning tensor for
+            TVAE models trained with a conditional dimension.  For SCVI this
+            argument is ignored.
+
+        Returns
+        -------
+        torch.Tensor
+            Float32 tensor of shape ``(n_samples, n_latent)``.
+
+        Raises
+        ------
+        RuntimeError
+            If no model has been trained yet, or the method is not supported.
+        """
+        if not self.synthesizer:
+            raise RuntimeError("No trained model found. Call generate() first.")
+
+        if self.method in ("tvae", "rtvae"):
+            tabular_model = self.synthesizer.model
+            pytorch_model = tabular_model.model
+            pytorch_model.eval()
+
+            # TVAE trains the TabularEncoder on the FULL DataFrame (including
+            # target_col).  We must pass the same columns here; do not drop
+            # target_col before encoding.
+            data_encoded = tabular_model.encode(data)
+            data_tensor = torch.tensor(
+                data_encoded.values, dtype=torch.float32
+            ).to(pytorch_model.device)
+
+            # Append conditional dimensions expected by the encoder.
+            cond_dim = getattr(pytorch_model, "n_units_conditional", 0)
+            if cond_dim > 0 and target_col and isinstance(data, pd.DataFrame) and target_col in data.columns:
+                unique_classes = data[target_col].unique()
+                label_to_idx = {str(c): i for i, c in enumerate(unique_classes)}
+                label_indices = torch.tensor(
+                    [label_to_idx.get(str(l), 0) for l in data[target_col].values],
+                    dtype=torch.long,
+                    device=pytorch_model.device,
+                )
+                cond_tensor = torch.zeros(
+                    len(data), cond_dim, device=pytorch_model.device
+                )
+                cond_tensor.scatter_(
+                    1, label_indices.unsqueeze(1).clamp(max=cond_dim - 1), 1.0
+                )
+                data_tensor = torch.cat([data_tensor, cond_tensor], dim=1)
+
+            with torch.no_grad():
+                encoder_out = pytorch_model.encoder(data_tensor)
+                mu = encoder_out[0] if isinstance(encoder_out, (tuple, list)) else encoder_out
+            return mu
+
+        if self.method in ("scvi", "scanvi"):
+            import torch as _torch
+            model = self.synthesizer
+            z = model.get_latent_representation()
+            return _torch.tensor(z, dtype=_torch.float32)
+
+        raise RuntimeError(
+            f"encode_to_latent() is not supported for method '{self.method}'. "
+            "Supported: tvae, rtvae, scvi, scanvi."
+        )
+
+    def decode_from_latent(
+        self,
+        z: "torch.Tensor",
+        data=None,
+        target_col: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """
+        Decodes latent vectors ``z`` back to the original feature space.
+
+        - **tvae / rtvae**: runs VAE decoder → TabularEncoder inverse_transform.
+        - **scvi / scanvi**: calls the model's generative pass and returns
+          a DataFrame with the original gene columns.
+
+        Parameters
+        ----------
+        z:
+            Float32 tensor of shape ``(n_samples, n_latent)`` produced by
+            :meth:`encode_to_latent` (or a manually perturbed version of it).
+        data:
+            Reference data used to infer library size (SCVI only) and column
+            names.  Can be a :class:`pandas.DataFrame` or ``AnnData``.
+        target_col:
+            Label column to attach to the output DataFrame.  When provided
+            together with ``data``, labels are copied from the reference.
+
+        Returns
+        -------
+        pandas.DataFrame
+            Decoded samples in the original feature space.
+
+        Raises
+        ------
+        RuntimeError
+            If no model has been trained yet, or the method is not supported.
+        """
+        if not self.synthesizer:
+            raise RuntimeError("No trained model found. Call generate() first.")
+
+        n_samples = z.shape[0]
+
+        if self.method in ("tvae", "rtvae"):
+            tabular_model = self.synthesizer.model
+            pytorch_model = tabular_model.model
+            pytorch_model.eval()
+
+            cond_dim = getattr(pytorch_model, "n_units_conditional", 0)
+            cond_tensor = None
+            if cond_dim > 0 and target_col is not None and data is not None and isinstance(data, pd.DataFrame):
+                unique_classes = data[target_col].unique()
+                label_to_idx = {str(c): i for i, c in enumerate(unique_classes)}
+                label_indices = torch.tensor(
+                    [label_to_idx.get(str(l), 0) for l in data[target_col].values],
+                    dtype=torch.long,
+                    device=pytorch_model.device,
+                )
+                cond_tensor = torch.zeros(
+                    n_samples, cond_dim, device=pytorch_model.device
+                )
+                cond_tensor.scatter_(
+                    1, label_indices.unsqueeze(1).clamp(max=cond_dim - 1), 1.0
+                )
+
+            z = z.to(pytorch_model.device)
+            with torch.no_grad():
+                reconstructed = pytorch_model.decoder(z, cond_tensor)
+
+            # Get encoded column names: encode the full data (TabularEncoder
+            # was fitted on the complete DataFrame including target_col).
+            enc_cols = tabular_model.encode(data).columns if data is not None else None
+            reconstructed_df = pd.DataFrame(
+                reconstructed.cpu().numpy(),
+                columns=enc_cols,
+            )
+            synth_df = tabular_model.decode(reconstructed_df)
+            return synth_df
+
+        if self.method in ("scvi", "scanvi"):
+            model = self.synthesizer
+            device = model.device if hasattr(model, "device") else next(model.module.parameters()).device
+
+            if data is not None and hasattr(data, "X"):
+                raw = data.X.toarray() if hasattr(data.X, "toarray") else np.array(data.X)
+                orig_log_lib = np.log(raw.sum(axis=1) + 1e-8)
+            elif data is not None and isinstance(data, pd.DataFrame):
+                num_cols = data.select_dtypes(include=[np.number]).columns
+                if target_col:
+                    num_cols = [c for c in num_cols if c != target_col]
+                orig_log_lib = np.log(data[num_cols].values.sum(axis=1) + 1e-8)
+            else:
+                orig_log_lib = np.zeros(n_samples)
+
+            z = z.to(device)
+            library_tensor = torch.tensor(
+                orig_log_lib, dtype=torch.float32
+            ).unsqueeze(1).to(device)
+            batch_index = torch.zeros(n_samples, 1, dtype=torch.long).to(device)
+
+            y_tensor = None
+            if getattr(model.module, "dispersion", "gene") == "gene-label" and data is not None:
+                try:
+                    label_registry = model.adata_manager.get_state_registry("labels")
+                    cat_mapping = label_registry.categorical_mapping
+                    label_map = {str(cat): i for i, cat in enumerate(cat_mapping)}
+                    if hasattr(data, "obs") and target_col in data.obs.columns:
+                        labels = data.obs[target_col].astype(str).values
+                    elif isinstance(data, pd.DataFrame) and target_col in data.columns:
+                        labels = data[target_col].astype(str).values
+                    else:
+                        labels = None
+                    if labels is not None:
+                        y_tensor = torch.tensor(
+                            [label_map.get(l, 0) for l in labels],
+                            dtype=torch.long,
+                        ).unsqueeze(1).to(device)
+                except Exception:
+                    pass
+
+            with torch.no_grad():
+                gen_out = model.module.generative(
+                    z=z,
+                    library=library_tensor,
+                    batch_index=batch_index,
+                    y=y_tensor,
+                )
+                px_dist = gen_out["px"]
+                vals = (
+                    px_dist.sample().cpu().numpy()
+                    if hasattr(px_dist, "sample")
+                    else px_dist.mean.cpu().numpy()
+                )
+
+            col_names = (
+                data.var_names.tolist()
+                if hasattr(data, "var_names")
+                else [c for c in (data.columns if isinstance(data, pd.DataFrame) else []) if c != target_col]
+            )
+            synth_df = pd.DataFrame(vals, columns=col_names)
+            if target_col is not None and data is not None:
+                if hasattr(data, "obs") and target_col in data.obs.columns:
+                    synth_df[target_col] = data.obs[target_col].values[:n_samples]
+                elif isinstance(data, pd.DataFrame) and target_col in data.columns:
+                    synth_df[target_col] = data[target_col].values[:n_samples]
+            return synth_df
+
+        raise RuntimeError(
+            f"decode_from_latent() is not supported for method '{self.method}'. "
+            "Supported: tvae, rtvae, scvi, scanvi."
+        )
+
     @staticmethod
     def to_anndata(
         df: pd.DataFrame,
@@ -1087,7 +1331,7 @@ class RealGenerator(BaseGenerator):
 
         self.synthesizer = syn
         self.method = "tvae"
-        self.metadata = {"columns": data.columns.tolist()}
+        self.metadata = {"columns": data.columns.tolist(), "target_col": target_col}
 
         if differentiation_factor > 0.0 and target_col and target_col in data.columns:
               synth_df = self.apply_latent_differentiation(
@@ -1189,17 +1433,22 @@ class RealGenerator(BaseGenerator):
         result = result.drop(columns=[stage_col])
         if custom_distributions:
             col = next(iter(custom_distributions), None)
-            if col and col in data.columns:
+            if col and col in result.columns:
                 dist = custom_distributions[col]
                 self.logger.info(
-                    f" Generating conditionally per class on '{col}' — {dist}"
+                    f" Applying custom_distributions on '{col}' — {dist} (resampling from staged result)"
                 )
                 frames = []
                 for cls, proportion in dist.items():
                     n_cls = max(1, round(n_samples * proportion))
-                    cls_df = syn.generate(count=n_cls, random_state=self.random_state).dataframe()
-                    cls_df[col] = cls
-                    frames.append(cls_df)
+                    cls_pool = result[result[col] == cls]
+                    if len(cls_pool) == 0:
+                        cls_pool = result
+                    frames.append(
+                        cls_pool.sample(n=n_cls, replace=len(cls_pool) < n_cls,
+                                        random_state=self.random_state)
+                        .assign(**{col: cls})
+                    )
                 result = (
                     pd.concat(frames, ignore_index=True)
                     .sample(frac=1, random_state=self.random_state)
@@ -1249,7 +1498,7 @@ class RealGenerator(BaseGenerator):
 
         self.synthesizer = syn
         self.method = "rtvae"
-        self.metadata = {"columns": data.columns.tolist()}
+        self.metadata = {"columns": data.columns.tolist(), "target_col": target_col}
 
         if differentiation_factor > 0.0 and target_col and target_col in data.columns:
             synth_df = self.apply_latent_differentiation(

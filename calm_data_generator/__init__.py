@@ -1,11 +1,11 @@
 # CALM-Data-Generator - Synthetic Data Generation Library
 
-from calm_data_generator.generators.tabular import RealGenerator, QualityReporter
-from calm_data_generator.generators.clinical import ClinicalDataGenerator
-from calm_data_generator.generators.drift import DriftInjector
-from calm_data_generator.generators.dynamics import ScenarioInjector, CausalEngine
-from calm_data_generator.generators.complex import ComplexGenerator
 from calm_data_generator import presets
+from calm_data_generator.generators.clinical import ClinicalDataGenerator
+from calm_data_generator.generators.complex import ComplexGenerator
+from calm_data_generator.generators.drift import DriftInjector
+from calm_data_generator.generators.dynamics import CausalEngine, ScenarioInjector
+from calm_data_generator.generators.tabular import QualityReporter, RealGenerator
 
 # Optional imports that may fail
 try:
@@ -13,7 +13,7 @@ try:
 except ImportError:
     StreamGenerator = None
 
-__version__ = "2.1.0"
+__version__ = "2.2.1"
 
 __all__ = [
     # Generators

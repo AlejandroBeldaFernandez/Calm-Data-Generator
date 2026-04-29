@@ -3,10 +3,11 @@ External Reporter Module
 Wraps YData Profiling to generate advanced HTML reports.
 """
 
-import os
-import pandas as pd
-from typing import Optional
 import logging
+import os
+from typing import Optional
+
+import pandas as pd
 
 # Initializing logger
 logger = logging.getLogger("ExternalReporter")
@@ -83,6 +84,7 @@ class ExternalReporter:
                 sortby=sortby,
                 html={"style": {"full_width": True}},
                 progress_bar=False,
+                minimal=minimal,
             )
 
             profile.to_file(output_path)

@@ -25,7 +25,7 @@ Todos los cambios notables de CALM-Data-Generator están documentados aquí.
 
 ### Dependencias
 
-- `scgft-evaluator @ git+https://github.com/nasim23ea/scgft-evaluator.git` promovido de dependencia opcional (solo `requirements.txt`) a dependencia obligatoria en `pyproject.toml`.
+- `scgft-evaluator>=0.1.0,<0.2.0` promovido de dependencia opcional (solo `requirements.txt`) a dependencia obligatoria en `pyproject.toml`.
 
 ### Experiencia de Desarrollo
 

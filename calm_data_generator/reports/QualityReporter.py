@@ -6,22 +6,24 @@ static report comparing a real dataset with a synthetic one.
 Uses YData Profiling for analysis and Plotly for interactive visualizations.
 """
 
-import pandas as pd
-import numpy as np
-from typing import Optional, Dict, Any, List, Union
-import warnings
-import logging
-from datetime import datetime
-import os
-import json
-import io
 import contextlib
+import io
+import json
+import logging
+import os
+import warnings
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Union
+
+import numpy as np
+import pandas as pd
+
 sc = None
 ad = None
 try:
-    from scgft_evaluator import ScGFT_Evaluator
-    import scanpy as sc
     import anndata as ad
+    import scanpy as sc
+    from scgft_evaluator import ScGFT_Evaluator
     SCGFT_AVAILABLE = True
 except ImportError:
     SCGFT_AVAILABLE = False
@@ -33,12 +35,12 @@ try:
 except ImportError:
     SKLEARN_AVAILABLE = False
 
-from calm_data_generator.reports.ExternalReporter import ExternalReporter
-from calm_data_generator.reports.Visualizer import Visualizer
-from calm_data_generator.reports.LocalIndexGenerator import LocalIndexGenerator
-from calm_data_generator.reports.base import BaseReporter
-from calm_data_generator.reports.DiscriminatorReporter import DiscriminatorReporter
-from calm_data_generator.generators.configs import ReportConfig
+from calm_data_generator.generators.configs import ReportConfig  # noqa: E402
+from calm_data_generator.reports.base import BaseReporter  # noqa: E402
+from calm_data_generator.reports.DiscriminatorReporter import DiscriminatorReporter  # noqa: E402
+from calm_data_generator.reports.ExternalReporter import ExternalReporter  # noqa: E402
+from calm_data_generator.reports.LocalIndexGenerator import LocalIndexGenerator  # noqa: E402
+from calm_data_generator.reports.Visualizer import Visualizer  # noqa: E402
 
 # Direct usage of sdmetrics
 try:
@@ -113,9 +115,9 @@ class QualityReporter(BaseReporter):
         return self._assess_quality_scores(real_df, synthetic_df)
 
     def calculate_ari(
-        self, 
-        real_df: pd.DataFrame, 
-        synthetic_df: pd.DataFrame, 
+        self,
+        real_df: pd.DataFrame,
+        synthetic_df: pd.DataFrame,
         target_col: str
     ) -> Dict[str, float]:
         """
@@ -589,10 +591,15 @@ class QualityReporter(BaseReporter):
 
         # Cross duplicates
         try:
-            real_unique = real_df.drop_duplicates()
-            merged = synthetic_df.merge(
-                real_unique, on=list(synthetic_df.columns), how="left", indicator=True
-            )
+            shared_cols = [c for c in synthetic_df.columns if c in real_df.columns]
+            real_unique = real_df[shared_cols].drop_duplicates()
+            synth_cast = synthetic_df[shared_cols].copy()
+            for col in shared_cols:
+                try:
+                    synth_cast[col] = synth_cast[col].astype(real_unique[col].dtype)
+                except (ValueError, TypeError):
+                    pass
+            merged = synth_cast.merge(real_unique, on=shared_cols, how="left", indicator=True)
             cross_dup_count = (merged["_merge"] == "both").sum()
         except Exception as e:
             self.logger.warning(f"Could not compute cross-duplication count; defaulting to 0. Reason: {e}")
@@ -755,9 +762,9 @@ class QualityReporter(BaseReporter):
             return None
 
     def _calculate_ari_metrics(
-        self, 
-        real_df: pd.DataFrame, 
-        synthetic_df: pd.DataFrame, 
+        self,
+        real_df: pd.DataFrame,
+        synthetic_df: pd.DataFrame,
         target_col: Optional[str]
     ) -> Optional[Dict[str, float]]:
         """
@@ -775,21 +782,21 @@ class QualityReporter(BaseReporter):
                 features = df.select_dtypes(include=[np.number]).drop(columns=[t_col], errors='ignore')
                 if features.empty:
                     return None
-                
+
                 # Fill NaNs for KMeans
                 X = features.fillna(0).values
-                
+
                 # Handle cases where we have fewer samples than clusters
                 k = min(2, len(X))
                 if k < 2:
                     return 0.0
-                
+
                 kmeans = KMeans(n_clusters=k, n_init=10, random_state=42)
                 cluster_labels = kmeans.fit_predict(X)
-                
+
                 # Get true labels (convert to categorical codes if necessary)
                 true_labels = pd.Categorical(df[t_col]).codes
-                
+
                 return float(adjusted_rand_score(true_labels, cluster_labels))
 
             ari_real = get_ari(real_df, target_col)
@@ -805,9 +812,9 @@ class QualityReporter(BaseReporter):
             return None
 
     def _run_scgft_evaluation(
-        self, 
-        real_df: pd.DataFrame, 
-        synthetic_df: pd.DataFrame, 
+        self,
+        real_df: pd.DataFrame,
+        synthetic_df: pd.DataFrame,
         output_dir: str,
         target_col: Optional[str] = None
     ) -> None:
@@ -830,10 +837,10 @@ class QualityReporter(BaseReporter):
             numeric_cols = real_df.select_dtypes(include=[np.number]).columns.tolist()
             if target_col and target_col in numeric_cols:
                 numeric_cols.remove(target_col)
-            
+
             adata_real = ad.AnnData(real_df[numeric_cols])
             adata_synth = ad.AnnData(synthetic_df[numeric_cols])
-            
+
             if target_col and target_col in real_df.columns:
                 adata_real.obs["cell_type"] = real_df[target_col].astype(str).values
                 adata_synth.obs["cell_type"] = synthetic_df[target_col].astype(str).values
@@ -845,7 +852,7 @@ class QualityReporter(BaseReporter):
             # 2. Basic Preprocessing for scvi metrics (PCA is required)
             if self.verbose:
                 print("   -> Preprocessing AnnData (PCA)...")
-            
+
             sc.pp.pca(adata_real)
             sc.pp.pca(adata_synth)
 
@@ -878,7 +885,7 @@ class QualityReporter(BaseReporter):
 
             # 4. Save to HTML Report
             scgft_report_path = os.path.join(output_dir, "scgft_report.html")
-            
+
             html_content = f"""
             <html>
             <head>
@@ -911,7 +918,7 @@ class QualityReporter(BaseReporter):
             </body>
             </html>
             """
-            
+
             with open(scgft_report_path, "w") as html_file:
                 html_file.write(html_content)
 

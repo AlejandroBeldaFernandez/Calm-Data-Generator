@@ -13,11 +13,11 @@ Key Features:
 - **Timestamp Alignment**: Can inject timestamps that are aligned with the block structure.
 """
 
-import os
 import logging
+import os
 import warnings
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Union
+from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -27,9 +27,10 @@ warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-from .RealGenerator import RealGenerator
-from calm_data_generator.reports.QualityReporter import QualityReporter
-from calm_data_generator.generators.configs import DriftConfig, ReportConfig
+from calm_data_generator.generators.configs import DriftConfig, ReportConfig  # noqa: E402
+from calm_data_generator.reports.QualityReporter import QualityReporter  # noqa: E402
+
+from .RealGenerator import RealGenerator  # noqa: E402
 
 
 class RealBlockGenerator(RealGenerator):
@@ -59,7 +60,7 @@ class RealBlockGenerator(RealGenerator):
         self.logger = logging.getLogger(self.__class__.__name__)
         self.logger.setLevel(logging.INFO)
 
-       
+
         self.logger.info("RealBlockGenerator initialized.")
 
     # --------------------------------------------------------------------------- #
@@ -162,10 +163,10 @@ class RealBlockGenerator(RealGenerator):
             data=block_data_no_block,
             method=method,
             target_col=target_col,
-            model_params=model_params,
             n_samples=n_samples,
             output_dir=output_dir,
             custom_distributions=custom_distributions,
+            **(model_params or {}),
         )
 
         if synthetic_block is None:
