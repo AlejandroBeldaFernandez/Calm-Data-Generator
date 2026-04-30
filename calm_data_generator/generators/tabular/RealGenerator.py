@@ -704,21 +704,27 @@ class RealGenerator(BaseGenerator):
             ).to(pytorch_model.device)
 
             # Append conditional dimensions expected by the encoder.
+            # n_units_conditional may be non-zero even without explicit cond (Synthcity default).
+            # Always append a cond tensor of the right size; use label one-hot when target_col
+            # is available, zeros otherwise.
             cond_dim = getattr(pytorch_model, "n_units_conditional", 0)
-            if cond_dim > 0 and target_col and isinstance(data, pd.DataFrame) and target_col in data.columns:
-                unique_classes = data[target_col].unique()
-                label_to_idx = {str(c): i for i, c in enumerate(unique_classes)}
-                label_indices = torch.tensor(
-                    [label_to_idx.get(str(l), 0) for l in data[target_col].values],
-                    dtype=torch.long,
-                    device=pytorch_model.device,
-                )
-                cond_tensor = torch.zeros(
-                    len(data), cond_dim, device=pytorch_model.device
-                )
-                cond_tensor.scatter_(
-                    1, label_indices.unsqueeze(1).clamp(max=cond_dim - 1), 1.0
-                )
+            if cond_dim > 0:
+                if target_col and isinstance(data, pd.DataFrame) and target_col in data.columns:
+                    unique_classes = data[target_col].unique()
+                    label_to_idx = {str(c): i for i, c in enumerate(unique_classes)}
+                    label_indices = torch.tensor(
+                        [label_to_idx.get(str(l), 0) for l in data[target_col].values],
+                        dtype=torch.long,
+                        device=pytorch_model.device,
+                    )
+                    cond_tensor = torch.zeros(
+                        len(data), cond_dim, device=pytorch_model.device
+                    )
+                    cond_tensor.scatter_(
+                        1, label_indices.unsqueeze(1).clamp(max=cond_dim - 1), 1.0
+                    )
+                else:
+                    cond_tensor = torch.zeros(len(data_tensor), cond_dim, device=pytorch_model.device)
                 data_tensor = torch.cat([data_tensor, cond_tensor], dim=1)
 
             with torch.no_grad():
@@ -784,20 +790,23 @@ class RealGenerator(BaseGenerator):
 
             cond_dim = getattr(pytorch_model, "n_units_conditional", 0)
             cond_tensor = None
-            if cond_dim > 0 and target_col is not None and data is not None and isinstance(data, pd.DataFrame):
-                unique_classes = data[target_col].unique()
-                label_to_idx = {str(c): i for i, c in enumerate(unique_classes)}
-                label_indices = torch.tensor(
-                    [label_to_idx.get(str(l), 0) for l in data[target_col].values],
-                    dtype=torch.long,
-                    device=pytorch_model.device,
-                )
-                cond_tensor = torch.zeros(
-                    n_samples, cond_dim, device=pytorch_model.device
-                )
-                cond_tensor.scatter_(
-                    1, label_indices.unsqueeze(1).clamp(max=cond_dim - 1), 1.0
-                )
+            if cond_dim > 0:
+                if target_col is not None and data is not None and isinstance(data, pd.DataFrame) and target_col in data.columns:
+                    unique_classes = data[target_col].unique()
+                    label_to_idx = {str(c): i for i, c in enumerate(unique_classes)}
+                    label_indices = torch.tensor(
+                        [label_to_idx.get(str(l), 0) for l in data[target_col].values],
+                        dtype=torch.long,
+                        device=pytorch_model.device,
+                    )
+                    cond_tensor = torch.zeros(
+                        n_samples, cond_dim, device=pytorch_model.device
+                    )
+                    cond_tensor.scatter_(
+                        1, label_indices.unsqueeze(1).clamp(max=cond_dim - 1), 1.0
+                    )
+                else:
+                    cond_tensor = torch.zeros(n_samples, cond_dim, device=pytorch_model.device)
 
             z = z.to(pytorch_model.device)
             with torch.no_grad():
@@ -1322,7 +1331,16 @@ class RealGenerator(BaseGenerator):
         clipping_factor = model_kwargs.pop("clipping_factor", 0.1)
 
         syn = self._get_synthesizer("tvae", **model_kwargs)
-        _fit_kw = {"cond": cond} if cond is not None else {}
+        # cond for fit must have len(data) rows; cond for generate must have n_samples rows.
+        # Resize each independently so both calls always get the right length.
+        if cond is not None:
+            import numpy as _np
+            cond_arr = _np.asarray(cond)
+            cond_fit = pd.Series(_np.resize(cond_arr, len(data)))
+            cond_gen = pd.Series(_np.resize(cond_arr, n_samples))
+        else:
+            cond_fit = cond_gen = None
+        _fit_kw = {"cond": cond_fit} if cond_fit is not None else {}
         try:
             syn.fit(data, **_fit_kw)
         except Exception as e:
@@ -1369,8 +1387,8 @@ class RealGenerator(BaseGenerator):
                 )
             else:
                 gen_kwargs = {"count": n_samples}
-                if cond is not None:
-                    gen_kwargs["cond"] = cond
+                if cond_gen is not None:
+                    gen_kwargs["cond"] = cond_gen
                 synth_df = syn.generate(**gen_kwargs, random_state=self.random_state).dataframe()
 
         return synth_df
