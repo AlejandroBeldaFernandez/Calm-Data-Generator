@@ -15,25 +15,26 @@ Explainability:
 
 """
 
-import pandas as pd
-import numpy as np
-import os
-import logging
-from typing import Dict, Any, Optional, List, Tuple
 import json
+import logging
+import os
 import warnings
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
+import pandas as pd
 
 # Optional dependencies
 try:
     from sklearn.ensemble import RandomForestClassifier
-    from sklearn.model_selection import train_test_split
     from sklearn.metrics import (
-        roc_auc_score,
         accuracy_score,
-        f1_score,
         balanced_accuracy_score,
+        f1_score,
+        roc_auc_score,
         roc_curve,
     )
+    from sklearn.model_selection import train_test_split
     from sklearn.preprocessing import LabelEncoder
 
     SKLEARN_AVAILABLE = True
@@ -44,8 +45,8 @@ except ImportError:
 SHAP_AVAILABLE = False
 
 try:
-    import plotly.graph_objects as go
     import plotly.express as px
+    import plotly.graph_objects as go
     import plotly.io as pio
 
     PLOTLY_AVAILABLE = True
@@ -179,9 +180,6 @@ class DiscriminatorReporter:
 
         combined = pd.concat([df0, df1], axis=0, ignore_index=True)
 
-        # Shuffle
-        combined = combined.sample(frac=1.0, random_state=42).reset_index(drop=True)
-
         y = combined.pop("__target__").values
 
         # Simple encoding for categoricals
@@ -256,11 +254,11 @@ class DiscriminatorReporter:
                 th, td {{ border: 1px solid #ddd; padding: 12px; text-align: left; }}
                 th {{ background-color: #f8f9fa; }}
                 .badge {{ padding: 8px; border-radius: 4px; color: white; font-weight: bold; display: inline-block; text-align: center; }}
-                
+
                 /* New logic: 1.0 = Good (Indistinguishable), 0.0 = Bad (Distinguishable) */
-                .score-container {{ 
-                    padding: 20px; 
-                    background-color: #f8f9fa; 
+                .score-container {{
+                    padding: 20px;
+                    background-color: #f8f9fa;
                     border-left: 5px solid #007bff;
                     margin-bottom: 20px;
                 }}
@@ -269,7 +267,7 @@ class DiscriminatorReporter:
         </head>
         <body>
             <h1>Adversarial Validation Metrics</h1>
-            
+
             <div class="score-container">
                 <div>Similarity Score (Indistinguishability)</div>
                 <div class="main-score" style="color: {self._get_score_color(metrics["similarity_score"])};">
@@ -285,7 +283,7 @@ class DiscriminatorReporter:
             <p>
                 The Discriminator tries to distinguish between <b>{label0}</b> (0) and <b>{label1}</b> (1).
             </p>
-            
+
             <table>
                 <tr><th>Metric</th><th>Value</th><th>Interpretation (1.0 = Perfect Quality)</th></tr>
                 <tr>
@@ -305,7 +303,7 @@ class DiscriminatorReporter:
                 </tr>
                 <tr><td><i>Technical Train AUC</i></td><td><i>{metrics["train_auc"]:.4f}</i></td><td><i>(Check for underfitting if close to 0.5)</i></td></tr>
             </table>
-            
+
             <div style="margin-top: 20px;">
                 {roc_div}
             </div>
@@ -370,9 +368,6 @@ class DiscriminatorReporter:
         )
         importance_div = pio.to_html(fig, full_html=False, include_plotlyjs="cdn")
 
-        shap_div = ""
-        shap_warning = ""
-
         # HTML Structure
         html_content = f"""
         <html>
@@ -385,10 +380,10 @@ class DiscriminatorReporter:
         <body>
             <h1>Discriminator Explainability</h1>
             <p>Which features allow the model to distinguish between the datasets?</p>
-            
+
             <h2>1. Feature Importance (Random Forest)</h2>
             {importance_div}
-            
+
             <p><i>SHAP values are disabled in this version.</i></p>
         </body>
         </html>

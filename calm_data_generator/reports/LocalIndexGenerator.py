@@ -3,9 +3,9 @@ Local Index Generator
 Generates a static index.html dashboard    - Uses synthetic data generation (e.g. via Synthcity) to augment the dataset.
 """
 
+import logging
 import os
 import time
-import logging
 
 logger = logging.getLogger("LocalIndexGenerator")
 
@@ -47,7 +47,7 @@ class LocalIndexGenerator:
             <!-- PLOTLY_SECTION -->
             <!-- SC_SECTION -->
         </div>
-        
+
         <div class="content">
             <!-- IFRAMES_PLACEHOLDER -->
         </div>
@@ -60,7 +60,7 @@ class LocalIndexGenerator:
             if(btn) btn.classList.add('active');
 
             document.querySelectorAll('iframe').forEach(f => f.classList.remove('active'));
-            
+
             const el = document.getElementById(id);
             if(el) el.classList.add('active');
         }
@@ -84,133 +84,66 @@ class LocalIndexGenerator:
         """
         Scans output_dir for artifacts and generates index.html.
         """
+        def _scan_reports(report_defs, output_dir, ts, multi_file=False):
+            found, nav_html, iframe_html = [], "", ""
+            for rid, config in report_defs.items():
+                files = config.get("files", [config.get("file")])
+                label = config["label"]
+                for fname in files:
+                    if os.path.exists(os.path.join(output_dir, fname)):
+                        found.append((rid, fname, label))
+                        break
+            for rid, fname, label in found:
+                nav_html += f'''
+                    <div class="tab-row">
+                        <button class="nav-btn" onclick="showTab('{rid}')" id="btn-{rid}">{label}</button>
+                        <a href="{fname}" target="_blank" title="Open in New Tab">-></a>
+                    </div>
+                    '''
+                iframe_html += f'<iframe id="{rid}" src="{fname}?v={ts}" scrolling="yes"></iframe>\n'
+            return found, nav_html, iframe_html
+
         try:
             ts = int(time.time())
-
-            # === YData Reports Section ===
-            ydata_section = ""
             iframes_html = ""
 
             ydata_reports = {
-                "comparison": {
-                    "files": ["comparison_report.html"],
-                    "label": "YData Comparison",
-                },
-                "profile": {
-                    "files": ["generated_profile.html", "profile_report.html"],
-                    "label": "Generated Data Profile",
-                },
+                "comparison": {"files": ["comparison_report.html"], "label": "YData Comparison"},
+                "profile": {"files": ["generated_profile.html", "profile_report.html"], "label": "Generated Data Profile"},
             }
-
-            found_ydata = []
-            for rid, config in ydata_reports.items():
-                for fname in config["files"]:
-                    if os.path.exists(os.path.join(output_dir, fname)):
-                        found_ydata.append((rid, fname, config["label"]))
-                        break
-
-            if found_ydata:
-                ydata_section = '<div class="section-title">YData Reports</div>\n'
-                for rid, fname, label in found_ydata:
-                    ydata_section += f'''
-                    <div class="tab-row">
-                        <button class="nav-btn" onclick="showTab('{rid}')" id="btn-{rid}">{label}</button>
-                        <a href="{fname}" target="_blank" title="Open in New Tab">-></a>
-                    </div>
-                    '''
-                    iframes_html += f'<iframe id="{rid}" src="{fname}?v={ts}" scrolling="yes"></iframe>\n'
-
-            # === Plotly Reports Section ===
-            plotly_section = ""
-
             plotly_reports = {
-                "quality_scores": {
-                    "file": "quality_scores.html",
-                    "label": "Quality Scores",
-                },
-                "quality_evolution": {
-                    "file": "quality_evolution.html",
-                    "label": "Quality Evolution",
-                },
-                "drift_stats": {
-                    "file": "drift_stats.html",
-                    "label": "Drift Statistics",
-                },
-                "evolution_plot": {
-                    "file": "evolution_plot.html",
-                    "label": "Feature Evolution (ScenarioInjector)",
-                },
-                "plot_comparison": {
-                    "file": "plot_comparison.html",
-                    "label": "Distribution Comparison",
-                },
-                "density": {
-                    "file": "density_plots.html",
-                    "label": "Density Plots",
-                },
-                "dimensionality": {
-                    "file": "dimensionality_plot.html",
-                    "label": "PCA Visualization",
-                },
-                "discriminator_metrics": {
-                    "file": "discriminator_metrics.html",
-                    "label": "Adversarial Validation",
-                },
-                "discriminator_explainability": {
-                    "file": "discriminator_explainability.html",
-                    "label": "Discriminator Explainability",
-                },
+                "quality_scores": {"file": "quality_scores.html", "label": "Quality Scores"},
+                "quality_evolution": {"file": "quality_evolution.html", "label": "Quality Evolution"},
+                "drift_stats": {"file": "drift_stats.html", "label": "Drift Statistics"},
+                "evolution_plot": {"file": "evolution_plot.html", "label": "Feature Evolution (ScenarioInjector)"},
+                "plot_comparison": {"file": "plot_comparison.html", "label": "Distribution Comparison"},
+                "density": {"file": "density_plots.html", "label": "Density Plots"},
+                "dimensionality": {"file": "dimensionality_plot.html", "label": "PCA Visualization"},
+                "discriminator_metrics": {"file": "discriminator_metrics.html", "label": "Adversarial Validation"},
+                "discriminator_explainability": {"file": "discriminator_explainability.html", "label": "Discriminator Explainability"},
             }
-
-            found_plotly = []
-            for rid, config in plotly_reports.items():
-                fname = config["file"]
-                if os.path.exists(os.path.join(output_dir, fname)):
-                    found_plotly.append((rid, fname, config["label"]))
-
-            if found_plotly:
-                plotly_section = '<div class="section-title">Interactive Plots</div>\n'
-                for rid, fname, label in found_plotly:
-                    plotly_section += f'''
-                    <div class="tab-row">
-                        <button class="nav-btn" onclick="showTab('{rid}')" id="btn-{rid}">{label}</button>
-                        <a href="{fname}" target="_blank" title="Open in New Tab">-></a>
-                    </div>
-                    '''
-                    iframes_html += f'<iframe id="{rid}" src="{fname}?v={ts}" scrolling="yes"></iframe>\n'
-
-            # === Single Cell Reports Section ===
-            sc_section = ""
             sc_reports = {
-                "scgft": {
-                    "file": "scgft_report.html",
-                    "label": "scGFT Evaluation",
-                },
+                "scgft": {"file": "scgft_report.html", "label": "scGFT Evaluation"},
             }
-            
-            found_sc = []
-            for rid, config in sc_reports.items():
-                fname = config["file"]
-                if os.path.exists(os.path.join(output_dir, fname)):
-                    found_sc.append((rid, fname, config["label"]))
-            
-            if found_sc:
-                sc_section = '<div class="section-title">Single Cell Analysis</div>\n'
-                for rid, fname, label in found_sc:
-                    sc_section += f'''
-                    <div class="tab-row">
-                        <button class="nav-btn" onclick="showTab('{rid}')" id="btn-{rid}">{label}</button>
-                        <a href="{fname}" target="_blank" title="Open in New Tab">-></a>
-                    </div>
-                    '''
-                    iframes_html += f'<iframe id="{rid}" src="{fname}?v={ts}" scrolling="yes"></iframe>\n'
 
-            # === Assemble HTML ===
-            html = LocalIndexGenerator.HTML_TEMPLATE
-            html = html.replace("<!-- YDATA_SECTION -->", ydata_section)
-            html = html.replace("<!-- PLOTLY_SECTION -->", plotly_section)
-            html = html.replace("<!-- SC_SECTION -->", sc_section)
-            html = html.replace("<!-- IFRAMES_PLACEHOLDER -->", iframes_html)
+            found_ydata, ydata_nav, ydata_iframes = _scan_reports(ydata_reports, output_dir, ts)
+            found_plotly, plotly_nav, plotly_iframes = _scan_reports(plotly_reports, output_dir, ts)
+            found_sc, sc_nav, sc_iframes = _scan_reports(sc_reports, output_dir, ts)
+
+            ydata_section = ('<div class="section-title">YData Reports</div>\n' + ydata_nav) if found_ydata else ""
+            plotly_section = ('<div class="section-title">Interactive Plots</div>\n' + plotly_nav) if found_plotly else ""
+            sc_section = ('<div class="section-title">Single Cell Analysis</div>\n' + sc_nav) if found_sc else ""
+            iframes_html = ydata_iframes + plotly_iframes + sc_iframes
+
+            html = LocalIndexGenerator.HTML_TEMPLATE.replace(
+                "<!-- YDATA_SECTION -->", ydata_section
+            ).replace(
+                "<!-- PLOTLY_SECTION -->", plotly_section
+            ).replace(
+                "<!-- SC_SECTION -->", sc_section
+            ).replace(
+                "<!-- IFRAMES_PLACEHOLDER -->", iframes_html
+            )
 
             index_path = os.path.join(output_dir, "index.html")
             with open(index_path, "w", encoding="utf-8") as f:

@@ -129,6 +129,19 @@ class QualityReporter(BaseReporter):
         """Wrapper for generate_comprehensive_report to satisfy BaseReporter contract."""
         return self.generate_comprehensive_report(*args, **kwargs)
 
+    def generate_scgft_report(
+        self,
+        real_df: pd.DataFrame,
+        synthetic_df: pd.DataFrame,
+        output_dir: str,
+        target_column: Optional[str] = None,
+    ) -> None:
+        """
+        Runs only the scGFT single-cell evaluation without the full report pipeline.
+        """
+        os.makedirs(output_dir, exist_ok=True)
+        self._run_scgft_evaluation(real_df, synthetic_df, output_dir, target_column)
+
     def generate_comprehensive_report(
         self,
         real_df: pd.DataFrame,
@@ -455,15 +468,23 @@ class QualityReporter(BaseReporter):
             resample_rule=resample_rule,
         )
 
+    @staticmethod
+    def _build_sdmetrics_metadata(df: pd.DataFrame) -> Dict[str, Any]:
+        """Infers SDMetrics column metadata from DataFrame dtypes."""
+        cols = {}
+        for col in df.columns:
+            if pd.api.types.is_numeric_dtype(df[col]):
+                cols[col] = {"sdtype": "numerical"}
+            elif pd.api.types.is_datetime64_any_dtype(df[col]):
+                cols[col] = {"sdtype": "datetime"}
+            else:
+                cols[col] = {"sdtype": "categorical"}
+        return {"columns": cols}
+
     def _assess_quality_scores(
         self, real_df: pd.DataFrame, synthetic_df: pd.DataFrame
     ) -> Dict[str, Any]:
-        """
-        Assesses the quality of synthetic data using SDMetrics.
-        """
-        """
-        Assesses the quality of synthetic data using SDMetrics.
-        """
+        """Assesses the quality of synthetic data using SDMetrics."""
         if not SDMETRICS_AVAILABLE:
             return {"error": "SDMetrics not available"}
 
@@ -471,27 +492,15 @@ class QualityReporter(BaseReporter):
             if self.verbose:
                 print("\nRunning SDMetrics Quality Assessment...")
 
-            # Align columns between real and synthetic (only keep common columns)
             common_cols = list(set(real_df.columns) & set(synthetic_df.columns))
-            if len(common_cols) < len(real_df.columns):
-                if self.verbose:
-                    dropped = set(real_df.columns) - set(common_cols)
-                    print(f"   -> Aligning columns for (dropped: {dropped})")
+            if len(common_cols) < len(real_df.columns) and self.verbose:
+                dropped = set(real_df.columns) - set(common_cols)
+                print(f"   -> Aligning columns for (dropped: {dropped})")
 
             real_aligned = real_df[common_cols]
             synth_aligned = synthetic_df[common_cols]
 
-            # Build metadata for sdmetrics
-            # Simple metadata inference
-            # We construct a dict representing columns: {col_name: sdtype}
-            md_dict = {"columns": {}}
-            for col in real_aligned.columns:
-                if pd.api.types.is_numeric_dtype(real_aligned[col]):
-                    md_dict["columns"][col] = {"sdtype": "numerical"}
-                elif pd.api.types.is_datetime64_any_dtype(real_aligned[col]):
-                    md_dict["columns"][col] = {"sdtype": "datetime"}
-                else:
-                    md_dict["columns"][col] = {"sdtype": "categorical"}
+            md_dict = self._build_sdmetrics_metadata(real_aligned)
 
             report = QualityReport()
             report.generate(real_aligned, synth_aligned, md_dict)
@@ -539,15 +548,7 @@ class QualityReporter(BaseReporter):
                     continue
 
                 try:
-                    # Build metadata for sdmetrics
-                    md_dict = {"columns": {}}
-                    for col in real_block.columns:
-                        if pd.api.types.is_numeric_dtype(real_block[col]):
-                            md_dict["columns"][col] = {"sdtype": "numerical"}
-                        elif pd.api.types.is_datetime64_any_dtype(real_block[col]):
-                            md_dict["columns"][col] = {"sdtype": "datetime"}
-                        else:
-                            md_dict["columns"][col] = {"sdtype": "categorical"}
+                    md_dict = self._build_sdmetrics_metadata(real_block)
 
                     report = QualityReport()
                     report.generate(
@@ -596,7 +597,7 @@ class QualityReporter(BaseReporter):
             synth_cast = synthetic_df[shared_cols].copy()
             for col in shared_cols:
                 try:
-                    synth_cast[col] = synth_cast[col].astype(real_unique[col].dtype)
+                    synth_cast[col] = synth_cast[col].astype(real_unique[col].dtype, errors="ignore")
                 except (ValueError, TypeError):
                     pass
             merged = synth_cast.merge(real_unique, on=shared_cols, how="left", indicator=True)
@@ -778,25 +779,15 @@ class QualityReporter(BaseReporter):
                 print("Calculating ARI metrics (class separability)...")
 
             def get_ari(df, t_col):
-                # Use only numeric features for clustering
                 features = df.select_dtypes(include=[np.number]).drop(columns=[t_col], errors='ignore')
                 if features.empty:
                     return None
-
-                # Fill NaNs for KMeans
                 X = features.fillna(0).values
-
-                # Handle cases where we have fewer samples than clusters
-                k = min(2, len(X))
-                if k < 2:
+                if len(X) < 2:
                     return 0.0
-
-                kmeans = KMeans(n_clusters=k, n_init=10, random_state=42)
+                kmeans = KMeans(n_clusters=2, n_init=10, random_state=42)
                 cluster_labels = kmeans.fit_predict(X)
-
-                # Get true labels (convert to categorical codes if necessary)
                 true_labels = pd.Categorical(df[t_col]).codes
-
                 return float(adjusted_rand_score(true_labels, cluster_labels))
 
             ari_real = get_ari(real_df, target_col)

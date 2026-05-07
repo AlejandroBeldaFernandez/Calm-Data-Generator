@@ -249,7 +249,7 @@ class RealGenerator(BaseGenerator):
                 part_low = pd.DataFrame(scalers[i_low].inverse_transform(fitted_copulas[i_low].random(n_low)), columns=numeric_cols)
                 part_high = pd.DataFrame(scalers[i_high].inverse_transform(fitted_copulas[i_high].random(n_high)), columns=numeric_cols)
                 parts.append(pd.concat([part_low, part_high], ignore_index=True))
-            return pd.concat(parts, ignore_index=True).head(n_samples).reset_index(drop=True)
+            return pd.concat(parts, ignore_index=True)[:n_samples].reset_index(drop=True)
 
         elif self.method == "hmm":
             samples, _ = self.synthesizer.sample(n_samples)
@@ -710,18 +710,8 @@ class RealGenerator(BaseGenerator):
             cond_dim = getattr(pytorch_model, "n_units_conditional", 0)
             if cond_dim > 0:
                 if target_col and isinstance(data, pd.DataFrame) and target_col in data.columns:
-                    unique_classes = data[target_col].unique()
-                    label_to_idx = {str(c): i for i, c in enumerate(unique_classes)}
-                    label_indices = torch.tensor(
-                        [label_to_idx.get(str(l), 0) for l in data[target_col].values],
-                        dtype=torch.long,
-                        device=pytorch_model.device,
-                    )
-                    cond_tensor = torch.zeros(
-                        len(data), cond_dim, device=pytorch_model.device
-                    )
-                    cond_tensor.scatter_(
-                        1, label_indices.unsqueeze(1).clamp(max=cond_dim - 1), 1.0
+                    cond_tensor = self._build_cond_tensor(
+                        data, target_col, cond_dim, pytorch_model.device
                     )
                 else:
                     cond_tensor = torch.zeros(len(data_tensor), cond_dim, device=pytorch_model.device)
@@ -733,10 +723,9 @@ class RealGenerator(BaseGenerator):
             return mu
 
         if self.method in ("scvi", "scanvi"):
-            import torch as _torch
             model = self.synthesizer
             z = model.get_latent_representation()
-            return _torch.tensor(z, dtype=_torch.float32)
+            return torch.tensor(z, dtype=torch.float32)
 
         raise RuntimeError(
             f"encode_to_latent() is not supported for method '{self.method}'. "
@@ -792,18 +781,8 @@ class RealGenerator(BaseGenerator):
             cond_tensor = None
             if cond_dim > 0:
                 if target_col is not None and data is not None and isinstance(data, pd.DataFrame) and target_col in data.columns:
-                    unique_classes = data[target_col].unique()
-                    label_to_idx = {str(c): i for i, c in enumerate(unique_classes)}
-                    label_indices = torch.tensor(
-                        [label_to_idx.get(str(l), 0) for l in data[target_col].values],
-                        dtype=torch.long,
-                        device=pytorch_model.device,
-                    )
-                    cond_tensor = torch.zeros(
-                        n_samples, cond_dim, device=pytorch_model.device
-                    )
-                    cond_tensor.scatter_(
-                        1, label_indices.unsqueeze(1).clamp(max=cond_dim - 1), 1.0
+                    cond_tensor = self._build_cond_tensor(
+                        data, target_col, cond_dim, pytorch_model.device
                     )
                 else:
                     cond_tensor = torch.zeros(n_samples, cond_dim, device=pytorch_model.device)
@@ -827,7 +806,7 @@ class RealGenerator(BaseGenerator):
             device = model.device if hasattr(model, "device") else next(model.module.parameters()).device
 
             if data is not None and hasattr(data, "X"):
-                raw = data.X.toarray() if hasattr(data.X, "toarray") else np.array(data.X)
+                raw = self._safe_to_dense(data.X)
                 orig_log_lib = np.log(raw.sum(axis=1) + 1e-8)
             elif data is not None and isinstance(data, pd.DataFrame):
                 num_cols = data.select_dtypes(include=[np.number]).columns
@@ -1024,6 +1003,74 @@ class RealGenerator(BaseGenerator):
             model_kwargs["random_state"] = self.random_state
         return Plugins().get(method, **model_kwargs)
 
+    @staticmethod
+    def _normalize_epoch_params(model_kwargs: dict) -> dict:
+        """Renames the user-facing ``epochs`` key to Synthcity's ``n_iter``.
+
+        Several Synthcity plugins expose training length under ``n_iter``,
+        but callers commonly pass ``epochs``. This helper centralises the
+        rename so each ``_synthesize_*`` method does not duplicate the check.
+        """
+        if "epochs" in model_kwargs:
+            model_kwargs["n_iter"] = model_kwargs.pop("epochs")
+        return model_kwargs
+
+    def _concat_and_shuffle(self, parts: list) -> pd.DataFrame:
+        """Concatenates a list of DataFrames and shuffles the result.
+
+        Used after generating per-class chunks so that the final output is
+        not ordered by class. Uses ``self.random_state`` for reproducibility.
+        """
+        return (
+            pd.concat(parts, ignore_index=True)
+            .sample(frac=1.0, random_state=self.random_state)
+            .reset_index(drop=True)
+        )
+
+    @staticmethod
+    def _safe_to_dense(X) -> np.ndarray:
+        """Converts sparse arrays / matrices to a dense ``numpy.ndarray``.
+
+        Handles three cases that come up when working with AnnData/scipy:
+        objects exposing ``.toarray()`` (sparse matrices), ``np.matrix``
+        instances exposing ``.A1``, and plain array-likes.
+        """
+        if hasattr(X, "toarray"):
+            arr = X.toarray()
+        else:
+            arr = np.array(X)
+        if hasattr(arr, "A1"):
+            arr = arr.A1
+        return arr
+
+    @staticmethod
+    def _build_cond_tensor(
+        data: pd.DataFrame,
+        target_col: str,
+        cond_dim: int,
+        device,
+    ) -> "torch.Tensor":
+        """Builds the one-hot conditioning tensor expected by Synthcity VAEs.
+
+        Maps each label in ``data[target_col]`` to an index based on the
+        order of unique classes, then scatters a 1.0 onto that index in a
+        ``(len(data), cond_dim)`` zero tensor (clamping indices to fit the
+        conditional dimension).
+        """
+        target_series = data[target_col]
+        unique_classes = target_series.unique()
+        label_to_idx = {str(c): i for i, c in enumerate(unique_classes)}
+        label_indices = torch.tensor(
+            [label_to_idx.get(str(l), 0) for l in target_series.values],
+            dtype=torch.long,
+            device=device,
+        )
+        cond_tensor = torch.zeros(len(data), cond_dim, device=device)
+        cond_tensor.scatter_(
+            1, label_indices.unsqueeze(1).clamp(max=cond_dim - 1), 1.0
+        )
+        return cond_tensor
+
     def _validate_custom_distributions(
         self, custom_distributions: Dict, data: pd.DataFrame
     ) -> Dict:
@@ -1158,7 +1205,8 @@ class RealGenerator(BaseGenerator):
         self.logger.info(
             f"Split-by-class mode: training one {synthcity_plugin.upper()} per class..."
         )
-        class_counts = data[target_col].value_counts()
+        target_series = data[target_col]
+        class_counts = target_series.value_counts()
         total_original = len(data)
 
         dfs = []
@@ -1170,7 +1218,7 @@ class RealGenerator(BaseGenerator):
                 f"  Training model for class '{cls}' ({count} orig. samples, "
                 f"generating {n_cls} synthetic)..."
             )
-            subset = data[data[target_col] == cls].drop(columns=[target_col])
+            subset = data[target_series == cls].drop(columns=[target_col])
 
             syn = self._get_synthesizer(synthcity_plugin, **model_kwargs)
             syn.fit(subset)
@@ -1208,8 +1256,7 @@ class RealGenerator(BaseGenerator):
         """
         self.logger.info("Starting CTGAN synthesis via Synthcity...")
         self._patch_synthcity_encoder()  # Apply patch
-        if "epochs" in model_kwargs:
-            model_kwargs["n_iter"] = model_kwargs.pop("epochs")
+        model_kwargs = self._normalize_epoch_params(model_kwargs)
 
         # Filter out parameters not supported by CTGAN plugin
         model_kwargs.pop("differentiation_factor", None)
@@ -1249,11 +1296,7 @@ class RealGenerator(BaseGenerator):
                 cls_df = syn.generate(count=n_cls, random_state=self.random_state).dataframe()
                 cls_df[col] = cls
                 frames.append(cls_df)
-            synth_df = (
-                pd.concat(frames, ignore_index=True)
-                .sample(frac=1, random_state=self.random_state)
-                .reset_index(drop=True)
-            )
+            synth_df = self._concat_and_shuffle(frames)
         else:
             gen_kwargs = {"count": n_samples}
             if cond is not None:
@@ -1281,8 +1324,7 @@ class RealGenerator(BaseGenerator):
         """
         self.logger.info("Starting GREAT synthesis via Synthcity...")
         self._patch_synthcity_encoder()  # Apply patch
-        if "epochs" in model_kwargs:
-            model_kwargs["n_iter"] = model_kwargs.pop("epochs")
+        model_kwargs = self._normalize_epoch_params(model_kwargs)
 
         syn = self._get_synthesizer("great", **model_kwargs)
         try:
@@ -1324,8 +1366,7 @@ class RealGenerator(BaseGenerator):
         """
         self.logger.info("Starting TVAE synthesis via Synthcity...")
         self._patch_synthcity_encoder()  # Apply patch
-        if "epochs" in model_kwargs:
-            model_kwargs["n_iter"] = model_kwargs.pop("epochs")
+        model_kwargs = self._normalize_epoch_params(model_kwargs)
         differentiation_factor = model_kwargs.pop("differentiation_factor", 0.0)
         clipping_mode = model_kwargs.pop("clipping_mode", "strict")
         clipping_factor = model_kwargs.pop("clipping_factor", 0.1)
@@ -1334,10 +1375,9 @@ class RealGenerator(BaseGenerator):
         # cond for fit must have len(data) rows; cond for generate must have n_samples rows.
         # Resize each independently so both calls always get the right length.
         if cond is not None:
-            import numpy as _np
-            cond_arr = _np.asarray(cond)
-            cond_fit = pd.Series(_np.resize(cond_arr, len(data)))
-            cond_gen = pd.Series(_np.resize(cond_arr, n_samples))
+            cond_arr = np.asarray(cond)
+            cond_fit = pd.Series(np.resize(cond_arr, len(data)))
+            cond_gen = pd.Series(np.resize(cond_arr, n_samples))
         else:
             cond_fit = cond_gen = None
         _fit_kw = {"cond": cond_fit} if cond_fit is not None else {}
@@ -1380,11 +1420,7 @@ class RealGenerator(BaseGenerator):
                     cls_df = syn.generate(count=n_cls, random_state=self.random_state).dataframe()
                     cls_df[col] = cls
                     frames.append(cls_df)
-                synth_df = (
-                    pd.concat(frames, ignore_index=True)
-                    .sample(frac=1, random_state=self.random_state)
-                    .reset_index(drop=True)
-                )
+                synth_df = self._concat_and_shuffle(frames)
             else:
                 gen_kwargs = {"count": n_samples}
                 if cond_gen is not None:
@@ -1467,11 +1503,7 @@ class RealGenerator(BaseGenerator):
                                         random_state=self.random_state)
                         .assign(**{col: cls})
                     )
-                result = (
-                    pd.concat(frames, ignore_index=True)
-                    .sample(frac=1, random_state=self.random_state)
-                    .reset_index(drop=True)
-                )
+                result = self._concat_and_shuffle(frames)
 
 
         return result
@@ -1500,8 +1532,7 @@ class RealGenerator(BaseGenerator):
         """
         self.logger.info("Starting RTVAE synthesis via Synthcity...")
         self._patch_synthcity_encoder()  # Apply patch
-        if "epochs" in model_kwargs:
-            model_kwargs["n_iter"] = model_kwargs.pop("epochs")
+        model_kwargs = self._normalize_epoch_params(model_kwargs)
         differentiation_factor = model_kwargs.pop("differentiation_factor", 0.0)
         clipping_mode = model_kwargs.pop("clipping_mode", "strict")
         clipping_factor = model_kwargs.pop("clipping_factor", 0.1)
@@ -1547,11 +1578,7 @@ class RealGenerator(BaseGenerator):
                     cls_df = syn.generate(count=n_cls, random_state=self.random_state).dataframe()
                     cls_df[col] = cls
                     frames.append(cls_df)
-                synth_df = (
-                    pd.concat(frames, ignore_index=True)
-                    .sample(frac=1, random_state=self.random_state)
-                    .reset_index(drop=True)
-                )
+                synth_df = self._concat_and_shuffle(frames)
             else:
                 gen_kwargs = {"count": n_samples}
                 if cond is not None:
@@ -1580,7 +1607,6 @@ class RealGenerator(BaseGenerator):
         4. Generate synthetic latent z'(d) = z(d) + a * c.
         5. Decode z'(d) and apply flexible clipping.
         """
-        import numpy as np
         self.logger.info(f"Applying unified latent differentiation for {method} (factor: {differentiation_factor})")
 
         clipping_mode = kwargs.get("clipping_mode", "strict")
@@ -1598,7 +1624,8 @@ class RealGenerator(BaseGenerator):
                 data_encoded = tabular_model.encode(data)
                 data_tensor = torch.tensor(data_encoded.values, dtype=torch.float32).to(pytorch_model.device)
 
-                unique_classes = data[target_col].unique()
+                target_series = data[target_col]
+                unique_classes = target_series.unique()
                 if len(unique_classes) != 2:
                     self.logger.warning(f"Differentiation works best with 2 classes, found {len(unique_classes)}. Using first two.")
 
@@ -1613,7 +1640,7 @@ class RealGenerator(BaseGenerator):
                     cond_tensor_enc = None
                     if cond_dim > 0:
                         label_to_idx = {str(control_val): 0, str(case_val): 1}
-                        labels_enc = data[target_col].values
+                        labels_enc = target_series.values
                         label_indices = torch.tensor(
                             [label_to_idx.get(str(l), 0) for l in labels_enc],
                             dtype=torch.long,
@@ -1733,12 +1760,7 @@ class RealGenerator(BaseGenerator):
                 with torch.no_grad():
                     # Preserve library size logic
                     if hasattr(data, "X"):
-                        if hasattr(data.X, "toarray"):
-                            orig_lib_size = np.sum(data.X.toarray(), axis=1)
-                        else:
-                            orig_lib_size = np.sum(data.X, axis=1)
-                        if hasattr(orig_lib_size, "A1"):
-                            orig_lib_size = orig_lib_size.A1
+                        orig_lib_size = self._safe_to_dense(data.X).sum(axis=1)
                         orig_log_lib = np.log(orig_lib_size + 1e-8)
                     else:
                         orig_log_lib = np.zeros(len(data))
@@ -1880,8 +1902,7 @@ class RealGenerator(BaseGenerator):
             )
 
         self._patch_synthcity_encoder()
-        if "epochs" in model_kwargs:
-            model_kwargs["n_iter"] = model_kwargs.pop("epochs")
+        model_kwargs = self._normalize_epoch_params(model_kwargs)
 
         syn = self._get_synthesizer("bayesian_network", **model_kwargs)
         syn.fit(data)
@@ -1949,7 +1970,7 @@ class RealGenerator(BaseGenerator):
 
             parts.append(pd.concat([part_low, part_high], ignore_index=True))
 
-        result = pd.concat(parts, ignore_index=True).head(n_samples).reset_index(drop=True)
+        result = pd.concat(parts, ignore_index=True)[:n_samples].reset_index(drop=True)
 
         self.synthesizer = fitted_copulas
         self.method = "windowed_copula"
@@ -2359,12 +2380,10 @@ class RealGenerator(BaseGenerator):
         time_key = kwargs.get("time_key", None)
         target_col = kwargs.get("target_col", None)
 
-        import pandas.api.types as pat
-
         def _to_numeric_times(times_array):
             """Convert datetime arrays to numeric seconds from sequence start."""
             s = pd.Series(times_array)
-            if pat.is_datetime64_any_dtype(s) or pat.is_object_dtype(s):
+            if pd.api.types.is_datetime64_any_dtype(s) or pd.api.types.is_object_dtype(s):
                 try:
                     s = pd.to_datetime(s)
                     s = (s - s.iloc[0]).dt.total_seconds().astype(float)
@@ -2507,15 +2526,13 @@ class RealGenerator(BaseGenerator):
         # Prepare time series data for TimeSeriesDataLoader — same logic as _synthesize_timegan.
         # synthcity requires temporal_data as list of DataFrames, observation_times as list of
         # numeric arrays, and outcome as a DataFrame (not a flat input DataFrame).
-        import pandas.api.types as pat
-
         sequence_key = kwargs.get("sequence_key", None)
         time_key = kwargs.get("time_key", None)
         target_col = kwargs.get("target_col", None)
 
         def _to_numeric_times(times_array):
             s = pd.Series(times_array)
-            if pat.is_datetime64_any_dtype(s) or pat.is_object_dtype(s):
+            if pd.api.types.is_datetime64_any_dtype(s) or pd.api.types.is_object_dtype(s):
                 try:
                     s = pd.to_datetime(s)
                     s = (s - s.iloc[0]).dt.total_seconds().astype(float)
@@ -2641,15 +2658,13 @@ class RealGenerator(BaseGenerator):
         plugin = Plugins().get("fflows", n_iter=n_iter, batch_size=batch_size, lr=lr)
 
         # Reuse the same TimeSeriesDataLoader preparation logic as timegan/timevae
-        import pandas.api.types as pat
-
         sequence_key = kwargs.get("sequence_key", None)
         time_key = kwargs.get("time_key", None)
         target_col = kwargs.get("target_col", None)
 
         def _to_numeric_times(times_array):
             s = pd.Series(times_array)
-            if pat.is_datetime64_any_dtype(s) or pat.is_object_dtype(s):
+            if pd.api.types.is_datetime64_any_dtype(s) or pd.api.types.is_object_dtype(s):
                 try:
                     s = pd.to_datetime(s)
                     s = (s - s.iloc[0]).dt.total_seconds().astype(float)
@@ -3027,11 +3042,7 @@ class RealGenerator(BaseGenerator):
             self.logger.error("No samples generated.")
             return None
 
-        synth_df = (
-            pd.concat(frames, ignore_index=True)
-            .sample(frac=1, random_state=self.random_state)
-            .reset_index(drop=True)
-        )
+        synth_df = self._concat_and_shuffle(frames)
         self.logger.info(f"scANVI synthesis complete. Generated {len(synth_df)} samples.")
         return synth_df
 
@@ -3277,13 +3288,7 @@ class RealGenerator(BaseGenerator):
             latent_tensor = torch.tensor(latent_samples).to(model.device)
 
             if use_latent_sampling and kwargs.get('preserve_library_size', True):
-                if hasattr(adata_to_train.X, 'toarray'):
-                    orig_lib_size = np.sum(adata_to_train.X.toarray(), axis=1)
-                else:
-                    orig_lib_size = np.sum(adata_to_train.X, axis=1)
-                if hasattr(orig_lib_size, 'A1'):
-                     orig_lib_size = orig_lib_size.A1
-
+                orig_lib_size = self._safe_to_dense(adata_to_train.X).sum(axis=1)
                 orig_log_lib = np.log(orig_lib_size + 1e-8)
                 sampled_log_lib = orig_log_lib[indices]
                 library_tensor = torch.tensor(
@@ -3873,11 +3878,7 @@ class RealGenerator(BaseGenerator):
             )
             return synth
 
-        result = (
-            pd.concat(frames, ignore_index=True)
-            .sample(frac=1, random_state=self.random_state)
-            .reset_index(drop=True)
-        )
+        result = self._concat_and_shuffle(frames)
         self.logger.info(
             f"Post-process resampling complete: {len(result)} samples "
             f"(requested {n_samples})."
@@ -4255,8 +4256,7 @@ class RealGenerator(BaseGenerator):
         """
         self.logger.info("Starting DPGAN synthesis via Synthcity...")
         self._patch_synthcity_encoder()
-        if "epochs" in model_kwargs:
-            model_kwargs["n_iter"] = model_kwargs.pop("epochs")
+        model_kwargs = self._normalize_epoch_params(model_kwargs)
 
         syn = self._get_synthesizer("dpgan", **model_kwargs)
         _fit_kw = {"cond": cond} if cond is not None else {}
@@ -4310,8 +4310,7 @@ class RealGenerator(BaseGenerator):
         """
         self.logger.info("Starting PATE-GAN synthesis via Synthcity...")
         self._patch_synthcity_encoder()
-        if "epochs" in model_kwargs:
-            model_kwargs["n_iter"] = model_kwargs.pop("epochs")
+        model_kwargs = self._normalize_epoch_params(model_kwargs)
 
         syn = self._get_synthesizer("pategan", **model_kwargs)
         _fit_kw = {"cond": cond} if cond is not None else {}
