@@ -1625,7 +1625,10 @@ class RealGenerator(BaseGenerator):
                 pytorch_model = tabular_model.model
                 pytorch_model.eval()
 
-                data_encoded = tabular_model.encode(data)
+                orig_target_dtype = data[target_col].dtype
+                data_for_encode = data.copy()
+                data_for_encode[target_col] = data_for_encode[target_col].astype(str)
+                data_encoded = tabular_model.encode(data_for_encode)
                 data_tensor = torch.tensor(data_encoded.values, dtype=torch.float32).to(pytorch_model.device)
 
                 target_series = data[target_col]
@@ -1759,6 +1762,10 @@ class RealGenerator(BaseGenerator):
                 )
                 synth_df = syn.model.decode(reconstructed_df)
                 synth_df[target_col] = data[target_col].values
+                try:
+                    synth_df[target_col] = synth_df[target_col].astype(orig_target_dtype)
+                except (ValueError, TypeError):
+                    pass
 
             elif method == "scvi":
                 with torch.no_grad():
