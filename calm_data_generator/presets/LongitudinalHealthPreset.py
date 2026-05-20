@@ -1,5 +1,10 @@
-from .base import GeneratorPreset
+import logging
+
 from calm_data_generator.generators.clinical import ClinicalDataGenerator
+
+from .base import GeneratorPreset
+
+logger = logging.getLogger(__name__)
 
 
 class LongitudinalHealthPreset(GeneratorPreset):
@@ -13,7 +18,7 @@ class LongitudinalHealthPreset(GeneratorPreset):
         )
 
         if self.verbose:
-            print(
+            logger.info(
                 f"[LongitudinalHealthPreset] Simulating {n_samples} patients with ~{n_visits} visits each..."
             )
 

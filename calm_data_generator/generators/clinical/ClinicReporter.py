@@ -3,6 +3,7 @@ Specialized Clinical Data Reporter
 """
 
 import logging
+
 from calm_data_generator.generators.stream.StreamReporter import StreamReporter
 
 logger = logging.getLogger("ClinicReporter")
@@ -26,8 +27,6 @@ class ClinicReporter(StreamReporter):
         Currently uses StreamReporter's base logic.
         """
         if self.verbose:
-            print("\n" + "=" * 80)
-            print("CLINICAL DATA REPORT")
-            print("=" * 80)
+            logger.info("CLINICAL DATA REPORT")
 
         return super().generate_report(*args, **kwargs)

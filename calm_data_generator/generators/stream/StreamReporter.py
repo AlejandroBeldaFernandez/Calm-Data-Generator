@@ -5,18 +5,19 @@ This module provides the StreamReporter class, designed to generate a detailed, 
 for a single synthetic dataset using YData Profiling and Plotly visualizations.
 """
 
-import pandas as pd
-import numpy as np
-from typing import Optional, Dict, Any, List, Union
 import logging
-from datetime import datetime
 import os
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Union
 
-from calm_data_generator.reports.ExternalReporter import ExternalReporter
-from calm_data_generator.reports.Visualizer import Visualizer
-from calm_data_generator.reports.LocalIndexGenerator import LocalIndexGenerator
-from calm_data_generator.reports.base import BaseReporter
+import numpy as np
+import pandas as pd
+
 from calm_data_generator.generators.configs import ReportConfig
+from calm_data_generator.reports.base import BaseReporter
+from calm_data_generator.reports.ExternalReporter import ExternalReporter
+from calm_data_generator.reports.LocalIndexGenerator import LocalIndexGenerator
+from calm_data_generator.reports.Visualizer import Visualizer
 
 logger = logging.getLogger("StreamReporter")
 
@@ -91,12 +92,11 @@ class StreamReporter(BaseReporter):
         per_block_external_reports = report_config.per_block_external_reports
 
         if self.verbose:
-            print("=" * 80)
-            print("SYNTHETIC DATA REPORT")
-            print(f"Generator: {generator_name}")
-            print("JSON report saved successfully.")
-            print(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            print("=" * 80)
+            logger.info(
+                "SYNTHETIC DATA REPORT | Generator: %s | Timestamp: %s",
+                generator_name,
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            )
 
         os.makedirs(output_dir, exist_ok=True)
 
@@ -119,7 +119,7 @@ class StreamReporter(BaseReporter):
 
         # === Generate YData Profile ===
         if self.verbose:
-            print("\nGenerating YData Profile Report...")
+            logger.info("Generating YData Profile Report...")
 
         ExternalReporter.generate_profile(
             df=df_for_report,
@@ -132,7 +132,7 @@ class StreamReporter(BaseReporter):
 
         # === Generate Plotly Visualizations ===
         if self.verbose:
-            print("\nGenerating Plotly Visualizations...")
+            logger.info("Generating Plotly Visualizations...")
 
         # Density Plots
         Visualizer.generate_density_plots(
@@ -156,7 +156,7 @@ class StreamReporter(BaseReporter):
             and per_block_external_reports
         ):
             if self.verbose:
-                print("\nGenerating per-block reports...")
+                logger.info("Generating per-block reports...")
 
             unique_blocks = sorted(synthetic_df[block_column].unique(), key=str)
 
@@ -189,7 +189,7 @@ class StreamReporter(BaseReporter):
         LocalIndexGenerator.create_index(output_dir)
 
         if self.verbose:
-            print(f"\nReport generated at: {output_dir}")
+            logger.info("Report generated at: %s", output_dir)
 
     def _apply_resampling(
         self,
@@ -202,7 +202,7 @@ class StreamReporter(BaseReporter):
         Applies resampling/aggregation based on time or block column.
         """
         if self.verbose:
-            print(f"Applying resampling rule: {resample_rule}")
+            logger.info("Applying resampling rule: %s", resample_rule)
 
         def agg_mode(x):
             m = x.mode()

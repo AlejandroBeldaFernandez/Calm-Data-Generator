@@ -1,5 +1,10 @@
-from .base import GeneratorPreset
+import logging
+
 from calm_data_generator.generators.tabular import RealGenerator
+
+from .base import GeneratorPreset
+
+logger = logging.getLogger(__name__)
 
 
 class FastPrototypePreset(GeneratorPreset):
@@ -17,7 +22,7 @@ class FastPrototypePreset(GeneratorPreset):
         )
 
         if self.verbose:
-            print("[FastPrototypePreset] Generating data quickly using LightGBM...")
+            logger.info("[FastPrototypePreset] Generating data quickly using LightGBM...")
 
         # 10 iterations is very fast but provides decent enough structure
         # Use 1 iteration if fast_dev_run is True

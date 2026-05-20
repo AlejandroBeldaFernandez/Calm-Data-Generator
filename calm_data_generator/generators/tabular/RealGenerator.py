@@ -39,11 +39,9 @@ from tqdm import tqdm
 # Custom logger and reporter
 from calm_data_generator.generators.base import BaseGenerator
 from calm_data_generator.generators.configs import DateConfig, DriftConfig, ReportConfig
-from calm_data_generator.generators.drift.DriftInjector import DriftInjector
 
 # Synthcity import
 from calm_data_generator.generators.persistence_models import FCSModel
-from calm_data_generator.reports.QualityReporter import QualityReporter
 
 # Suppress common warnings for cleaner output
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -114,6 +112,7 @@ class RealGenerator(BaseGenerator):
             logger=logger,
         )
         self.verbose_training = verbose_training
+        from calm_data_generator.reports.QualityReporter import QualityReporter
         self.reporter = QualityReporter(minimal=minimal_report)
         self.synthesizer = None
         self.metadata = None
@@ -1385,12 +1384,7 @@ class RealGenerator(BaseGenerator):
         else:
             cond_fit = cond_gen = None
         _fit_kw = {"cond": cond_fit} if cond_fit is not None else {}
-        try:
-            syn.fit(data, **_fit_kw)
-        except Exception as e:
-            self.logger.error(f"TVAE training failed: {e}")
-            return None
-
+        syn.fit(data, **_fit_kw)
         self.synthesizer = syn
         self.method = "tvae"
         self.metadata = {"columns": data.columns.tolist(), "target_col": target_col}
@@ -4500,6 +4494,7 @@ class RealGenerator(BaseGenerator):
         self._is_training_active = True
 
         # Ensure reporter is fresh and respects the current minimal mode
+        from calm_data_generator.reports.QualityReporter import QualityReporter
         self.reporter = QualityReporter(minimal=self.minimal_report)
         """
         The main public method to generate synthetic data.
@@ -4695,206 +4690,236 @@ class RealGenerator(BaseGenerator):
         # synth default
         synth = None
 
-        if method == "ctgan":
-            synth = self._synthesize_ctgan(
-                data,
-                n_samples,
-                target_col=target_col,
-                custom_distributions=custom_distributions,
-                cond=cond,
-                **kwargs,
-            )
-        elif method == "great":
-            synth = self._synthesize_great(
-                data,
-                n_samples,
-                target_col=target_col,
-                **kwargs,
-            )
-        elif method == "dpgan":
-            synth = self._synthesize_dpgan(
-                data,
-                n_samples,
-                target_col=target_col,
-                custom_distributions=custom_distributions,
-                cond=cond,
-                **(kwargs or {}),
-            )
-        elif method == "pategan":
-            synth = self._synthesize_pategan(
-                data,
-                n_samples,
-                target_col=target_col,
-                custom_distributions=custom_distributions,
-                cond=cond,
-                **(kwargs or {}),
-            )
-        elif method == "tvae":
-            synth = self._synthesize_tvae(
-                data,
-                n_samples,
-                target_col=target_col,
-                custom_distributions=custom_distributions,
-                cond=cond,
-                **kwargs,
-            )
-        elif method == "rtvae":
-            synth = self._synthesize_rtvae(
-                data,
-                n_samples,
-                target_col=target_col,
-                custom_distributions=custom_distributions,
-                cond=cond,
-                **kwargs,
-            )
-        elif method == "conditional_drift":
-            synth = self._synthesize_conditional_drift(
-                data = data,
-                n_samples = n_samples,
-                time_col = kwargs.get("time_col") if kwargs else None,
-                n_stages = kwargs.get("n_stages", 5) if kwargs else 5,
-                general_stages = kwargs.get("general_stages") if kwargs else None,
-                base_method = kwargs.get("base_method", "tvae") if kwargs else "tvae",
-                **{k: v for k, v in kwargs.items() if k not in {"time_col", "n_stages", "base_method", "general_stages"}}
-            )
-        elif method == "windowed_copula":
-            synth = self._synthesize_windowed_copula(
-                data=data,
-                n_samples=n_samples,
-                time_col=kwargs.get("time_col") if kwargs else None,
-                n_windows=kwargs.get("n_windows", 5) if kwargs else 5,
-                generate_at=kwargs.get("generate_at") if kwargs else None,
-                 **{k: v for k, v in kwargs.items() if k not in {"time_col", "n_windows", "generate_at"}}
-            )
+        _METHOD_ALTERNATIVES = {
+            "ctgan": ["tvae", "cart"],
+            "tvae": ["cart", "ctgan"],
+            "rtvae": ["tvae", "cart"],
+            "cart": ["rf", "lgbm", "resample"],
+            "rf": ["cart", "lgbm"],
+            "lgbm": ["cart", "rf"],
+            "gmm": ["copula", "cart"],
+            "copula": ["gmm", "cart"],
+            "scvi": ["tvae", "cart"],
+            "scanvi": ["scvi", "tvae"],
+            "ddpm": ["tvae", "ctgan"],
+            "diffusion": ["tvae", "ctgan"],
+            "timegan": ["timevae", "fflows"],
+            "timevae": ["timegan", "fflows"],
+            "fflows": ["timegan", "timevae"],
+        }
 
-        elif method == "resample":
-            synth = self._synthesize_resample(
-                data,
-                n_samples,
-                target_col=target_col,
-                custom_distributions=custom_distributions,
-            )
-        elif method == "kde":
-            synth = self._synthesize_kde(
-                data,
-                n_samples,
-                target_col=target_col,
-                custom_distributions=custom_distributions,
-                **(kwargs or {}),
-            )
-        elif method == "cart":
-            synth = self._synthesize_cart(
-                data,
-                n_samples,
-                target_col=target_col,
-                custom_distributions=custom_distributions,
-                **(kwargs or {}),
-            )
-        elif method == "hmm":
-            synth = self._synthesize_hmm(
-                data,
-                n_samples,
-                n_components=kwargs.get("n_components", 4),
-                covariance_type=kwargs.get("covariance_type", "full"),
-                n_iter=kwargs.get("n_iter", 100),
-                **{k: v for k, v in kwargs.items() if k not in {"n_components", "covariance_type", "n_iter"}}
-            )
+        try:
+            if method == "ctgan":
+                synth = self._synthesize_ctgan(
+                    data,
+                    n_samples,
+                    target_col=target_col,
+                    custom_distributions=custom_distributions,
+                    cond=cond,
+                    **kwargs,
+                )
+            elif method == "great":
+                synth = self._synthesize_great(
+                    data,
+                    n_samples,
+                    target_col=target_col,
+                    **kwargs,
+                )
+            elif method == "dpgan":
+                synth = self._synthesize_dpgan(
+                    data,
+                    n_samples,
+                    target_col=target_col,
+                    custom_distributions=custom_distributions,
+                    cond=cond,
+                    **(kwargs or {}),
+                )
+            elif method == "pategan":
+                synth = self._synthesize_pategan(
+                    data,
+                    n_samples,
+                    target_col=target_col,
+                    custom_distributions=custom_distributions,
+                    cond=cond,
+                    **(kwargs or {}),
+                )
+            elif method == "tvae":
+                synth = self._synthesize_tvae(
+                    data,
+                    n_samples,
+                    target_col=target_col,
+                    custom_distributions=custom_distributions,
+                    cond=cond,
+                    **kwargs,
+                )
+            elif method == "rtvae":
+                synth = self._synthesize_rtvae(
+                    data,
+                    n_samples,
+                    target_col=target_col,
+                    custom_distributions=custom_distributions,
+                    cond=cond,
+                    **kwargs,
+                )
+            elif method == "conditional_drift":
+                synth = self._synthesize_conditional_drift(
+                    data = data,
+                    n_samples = n_samples,
+                    time_col = kwargs.get("time_col") if kwargs else None,
+                    n_stages = kwargs.get("n_stages", 5) if kwargs else 5,
+                    general_stages = kwargs.get("general_stages") if kwargs else None,
+                    base_method = kwargs.get("base_method", "tvae") if kwargs else "tvae",
+                    **{k: v for k, v in kwargs.items() if k not in {"time_col", "n_stages", "base_method", "general_stages"}}
+                )
+            elif method == "windowed_copula":
+                synth = self._synthesize_windowed_copula(
+                    data=data,
+                    n_samples=n_samples,
+                    time_col=kwargs.get("time_col") if kwargs else None,
+                    n_windows=kwargs.get("n_windows", 5) if kwargs else 5,
+                    generate_at=kwargs.get("generate_at") if kwargs else None,
+                     **{k: v for k, v in kwargs.items() if k not in {"time_col", "n_windows", "generate_at"}}
+                )
 
-        elif method == "xgboost":
-            synth = self._synthesize_xgboost(
-                data,
-                n_samples,
-                target_col=target_col,
-                custom_distributions=custom_distributions,
-                **(kwargs or {})
-            )
-        elif method == "copula":
-            synth = self._synthesize_copula(
-                data,
-                n_samples,
-                "copula",
-                target_col=target_col,
-                custom_distributions=custom_distributions,
-                **(kwargs or {}),
-            )
-        elif method == "rf":
-            synth = self._synthesize_rf(
-                data,
-                n_samples,
-                target_col=target_col,
-                custom_distributions=custom_distributions,
-                **(kwargs or {}),
-            )
-        elif method == "lgbm":
-            synth = self._synthesize_lgbm(
-                data,
-                n_samples,
-                target_col=target_col,
-                custom_distributions=custom_distributions,
-                **(kwargs or {}),
-            )
-        elif method == "gmm":
-            synth = self._synthesize_gmm(
-                data,
-                n_samples,
-                target_col=target_col,
-                custom_distributions=custom_distributions,
-                **(kwargs or {}),
-            )
+            elif method == "resample":
+                synth = self._synthesize_resample(
+                    data,
+                    n_samples,
+                    target_col=target_col,
+                    custom_distributions=custom_distributions,
+                )
+            elif method == "kde":
+                synth = self._synthesize_kde(
+                    data,
+                    n_samples,
+                    target_col=target_col,
+                    custom_distributions=custom_distributions,
+                    **(kwargs or {}),
+                )
+            elif method == "cart":
+                synth = self._synthesize_cart(
+                    data,
+                    n_samples,
+                    target_col=target_col,
+                    custom_distributions=custom_distributions,
+                    **(kwargs or {}),
+                )
+            elif method == "hmm":
+                synth = self._synthesize_hmm(
+                    data,
+                    n_samples,
+                    n_components=kwargs.get("n_components", 4),
+                    covariance_type=kwargs.get("covariance_type", "full"),
+                    n_iter=kwargs.get("n_iter", 100),
+                    **{k: v for k, v in kwargs.items() if k not in {"n_components", "covariance_type", "n_iter"}}
+                )
 
-        elif method == "smote":
-            synth = self._synthesize_smote(
-                data,
-                n_samples,
-                target_col=target_col,
-                custom_distributions=custom_distributions,
-                **(kwargs or {}),
-            )
-        elif method == "adasyn":
-            synth = self._synthesize_adasyn(
-                data,
-                n_samples,
-                target_col=target_col,
-                custom_distributions=custom_distributions,
-                **(kwargs or {}),
-            )
+            elif method == "xgboost":
+                synth = self._synthesize_xgboost(
+                    data,
+                    n_samples,
+                    target_col=target_col,
+                    custom_distributions=custom_distributions,
+                    **(kwargs or {})
+                )
+            elif method == "copula":
+                synth = self._synthesize_copula(
+                    data,
+                    n_samples,
+                    "copula",
+                    target_col=target_col,
+                    custom_distributions=custom_distributions,
+                    **(kwargs or {}),
+                )
+            elif method == "rf":
+                synth = self._synthesize_rf(
+                    data,
+                    n_samples,
+                    target_col=target_col,
+                    custom_distributions=custom_distributions,
+                    **(kwargs or {}),
+                )
+            elif method == "lgbm":
+                synth = self._synthesize_lgbm(
+                    data,
+                    n_samples,
+                    target_col=target_col,
+                    custom_distributions=custom_distributions,
+                    **(kwargs or {}),
+                )
+            elif method == "gmm":
+                synth = self._synthesize_gmm(
+                    data,
+                    n_samples,
+                    target_col=target_col,
+                    custom_distributions=custom_distributions,
+                    **(kwargs or {}),
+                )
 
-        elif method in ["diffusion", "ddpm"]:
-            synth = self._synthesize_ddpm(data, n_samples, **(kwargs or {}))
-        elif method == "timegan":
-            synth = self._synthesize_timegan(data, n_samples, **(kwargs or {}))
-        elif method == "timevae":
-            synth = self._synthesize_timevae(data, n_samples, **(kwargs or {}))
-        elif method == "fflows":
-            synth = self._synthesize_fflows(data, n_samples, **(kwargs or {}))
-        elif method in ("bayesian_network", "bn"):
-            synth = self._synthesize_bn(
-                data, n_samples, target_col=target_col, **(kwargs or {})
-            )
-        elif method == "scvi":
-            # Pass original_adata if available to avoid redundant conversion
-            synth = self._synthesize_scvi(
-                original_adata if original_adata is not None else data,
-                n_samples,
-                target_col=target_col,
-                **(kwargs or {}),
-            )
-        elif method == "scanvi":
-            # Pass original_adata if available to avoid redundant conversion
-            synth = self._synthesize_scanvi(
-                original_adata if original_adata is not None else data,
-                n_samples,
-                target_col=target_col,
-                **(kwargs or {}),
-            )
-        elif method == "gears":
-            # Pass original_adata if available to avoid redundant conversion
-            synth = self._synthesize_gears(
-                original_adata if original_adata is not None else data,
-                n_samples,
-                target_col=target_col,
-                **(kwargs or {}),
-            )
+            elif method == "smote":
+                synth = self._synthesize_smote(
+                    data,
+                    n_samples,
+                    target_col=target_col,
+                    custom_distributions=custom_distributions,
+                    **(kwargs or {}),
+                )
+            elif method == "adasyn":
+                synth = self._synthesize_adasyn(
+                    data,
+                    n_samples,
+                    target_col=target_col,
+                    custom_distributions=custom_distributions,
+                    **(kwargs or {}),
+                )
+
+            elif method in ["diffusion", "ddpm"]:
+                synth = self._synthesize_ddpm(data, n_samples, **(kwargs or {}))
+            elif method == "timegan":
+                synth = self._synthesize_timegan(data, n_samples, **(kwargs or {}))
+            elif method == "timevae":
+                synth = self._synthesize_timevae(data, n_samples, **(kwargs or {}))
+            elif method == "fflows":
+                synth = self._synthesize_fflows(data, n_samples, **(kwargs or {}))
+            elif method in ("bayesian_network", "bn"):
+                synth = self._synthesize_bn(
+                    data, n_samples, target_col=target_col, **(kwargs or {})
+                )
+            elif method == "scvi":
+                # Pass original_adata if available to avoid redundant conversion
+                synth = self._synthesize_scvi(
+                    original_adata if original_adata is not None else data,
+                    n_samples,
+                    target_col=target_col,
+                    **(kwargs or {}),
+                )
+            elif method == "scanvi":
+                # Pass original_adata if available to avoid redundant conversion
+                synth = self._synthesize_scanvi(
+                    original_adata if original_adata is not None else data,
+                    n_samples,
+                    target_col=target_col,
+                    **(kwargs or {}),
+                )
+            elif method == "gears":
+                # Pass original_adata if available to avoid redundant conversion
+                synth = self._synthesize_gears(
+                    original_adata if original_adata is not None else data,
+                    n_samples,
+                    target_col=target_col,
+                    **(kwargs or {}),
+                )
+
+        except Exception as _train_exc:
+            self.logger.debug("Training traceback:", exc_info=True)
+            _alternatives = _METHOD_ALTERNATIVES.get(method, ["cart", "resample"])
+            _alt_str = "', '".join(_alternatives)
+            raise RuntimeError(
+                f"Model training failed (method='{method}', n_samples={n_samples}, "
+                f"n_rows={len(data) if hasattr(data, '__len__') else '?'}). "
+                f"Reason: {_train_exc}. "
+                f"Try: method='{_alt_str}'."
+            ) from _train_exc
 
         # --- Post-process distribution enforcement ---
         # Methods that handle custom_distributions natively during generation:
@@ -5021,6 +5046,7 @@ class RealGenerator(BaseGenerator):
                     output_dir or "."
                 )  # Drift injector might need a dir, fallback to current
                 time_col_name = date_config.date_col if date_config else "timestamp"
+                from calm_data_generator.generators.drift.DriftInjector import DriftInjector
 
                 drift_injector = DriftInjector(
                     original_df=synth,  # We drift the synthetic data

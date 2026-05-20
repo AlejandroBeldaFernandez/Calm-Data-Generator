@@ -9,7 +9,7 @@ the common interface and shared functionality for all data reporters in the libr
 import logging
 import os
 from abc import ABC, abstractmethod
-from typing import Optional, Any
+from typing import Any, Optional
 
 from calm_data_generator.logger import get_logger
 
@@ -48,8 +48,6 @@ class BaseReporter(ABC):
 
     def log(self, message: str, level: str = "info") -> None:
         """Logs a message if verbose mode is enabled."""
-        if self.verbose:
-            print(message)
         getattr(self.logger, level)(message)
 
     @abstractmethod

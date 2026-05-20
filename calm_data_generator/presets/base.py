@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
+from typing import Any, Dict, Optional, Union
+
 import pandas as pd
-from typing import Union, Dict, Any, Optional
 
 
 class GeneratorPreset(ABC):

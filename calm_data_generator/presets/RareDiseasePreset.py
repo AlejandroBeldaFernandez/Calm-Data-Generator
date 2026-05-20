@@ -1,7 +1,13 @@
+import logging
 from typing import Any, Dict, Optional
+
 import pandas as pd
-from .base import GeneratorPreset
+
 from calm_data_generator.generators.clinical import ClinicalDataGenerator
+
+from .base import GeneratorPreset
+
+logger = logging.getLogger(__name__)
 
 
 class RareDiseasePreset(GeneratorPreset):
@@ -18,7 +24,7 @@ class RareDiseasePreset(GeneratorPreset):
         )
 
         if self.verbose:
-            print(
+            logger.info(
                 f"[RareDiseasePreset] Simulating rare disease cohort (Prevalence: {disease_ratio:.1%})..."
             )
 

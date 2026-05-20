@@ -12,17 +12,6 @@ import pandas as pd
 # Initializing logger
 logger = logging.getLogger("ExternalReporter")
 
-try:
-    from ydata_profiling import ProfileReport
-
-    YDATA_AVAILABLE = True
-except ImportError:
-    YDATA_AVAILABLE = False
-    logger.error(
-        "ydata-profiling is not installed. Please install it to use external reporting."
-    )
-
-
 class ExternalReporter:
     """
     Wrapper for external reporting libraries (YData Profiling).
@@ -53,7 +42,9 @@ class ExternalReporter:
         Returns:
             Absolute path to the generated report, or None if generation failed.
         """
-        if not YDATA_AVAILABLE:
+        try:
+            from ydata_profiling import ProfileReport
+        except ImportError:
             return None
 
         try:
@@ -123,7 +114,9 @@ class ExternalReporter:
         Returns:
             Absolute path to the generated report, or None.
         """
-        if not YDATA_AVAILABLE:
+        try:
+            from ydata_profiling import ProfileReport
+        except ImportError:
             return None
 
         try:

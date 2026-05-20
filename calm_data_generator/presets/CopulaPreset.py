@@ -1,5 +1,10 @@
-from .base import GeneratorPreset
+import logging
+
 from calm_data_generator.generators.tabular import RealGenerator
+
+from .base import GeneratorPreset
+
+logger = logging.getLogger(__name__)
 
 
 class CopulaPreset(GeneratorPreset):
@@ -14,7 +19,7 @@ class CopulaPreset(GeneratorPreset):
         )
 
         if self.verbose:
-            print("[CopulaPreset] Generating data using Gaussian Copula...")
+            logger.info("[CopulaPreset] Generating data using Gaussian Copula...")
 
         return gen.generate(
             data=data,

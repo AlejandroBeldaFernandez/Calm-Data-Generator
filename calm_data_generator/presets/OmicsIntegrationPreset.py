@@ -1,5 +1,10 @@
-from .base import GeneratorPreset
+import logging
+
 from calm_data_generator.generators.clinical import ClinicalDataGenerator
+
+from .base import GeneratorPreset
+
+logger = logging.getLogger(__name__)
 
 
 class OmicsIntegrationPreset(GeneratorPreset):
@@ -14,7 +19,7 @@ class OmicsIntegrationPreset(GeneratorPreset):
         )
 
         if self.verbose:
-            print(
+            logger.info(
                 f"[OmicsIntegrationPreset] Simulating multi-omics data (Clinical + {n_genes} Genes + {n_proteins} Proteins)..."
             )
 

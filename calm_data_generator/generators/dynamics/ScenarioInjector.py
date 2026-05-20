@@ -1,3 +1,4 @@
+import logging
 import os
 from typing import Callable, Dict, Optional, Union
 
@@ -9,6 +10,8 @@ from calm_data_generator.generators.configs import (
     ScenarioConfig,
 )
 from calm_data_generator.generators.utils.propagation import apply_func, propagate_numeric_drift
+
+logger = logging.getLogger(__name__)
 
 
 class ScenarioInjector:
@@ -436,7 +439,7 @@ class ScenarioInjector:
                         auto_report=False,
                     )
                 except Exception as e:
-                    print(f"Generator failed, using resampling: {e}")
+                    logger.warning("Generator failed, using resampling: %s", e)
                     synth_df = base_df.sample(
                         n=n_samples_per_period, replace=True
                     ).reset_index(drop=True)

@@ -1,5 +1,6 @@
-from .base import GeneratorPreset
 from calm_data_generator.generators.tabular import RealGenerator
+
+from .base import GeneratorPreset
 
 
 class FastPreset(GeneratorPreset):

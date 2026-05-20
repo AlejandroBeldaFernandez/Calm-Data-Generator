@@ -1,8 +1,14 @@
-import pandas as pd
+import logging
+from typing import Any, Dict, List, Optional, Union
+
 import numpy as np
-from typing import Dict, Union, Any, Optional, List
-from .base import GeneratorPreset
+import pandas as pd
+
 from calm_data_generator.generators.tabular import RealGenerator
+
+from .base import GeneratorPreset
+
+logger = logging.getLogger(__name__)
 
 
 class BalancedDataGeneratorPreset(GeneratorPreset):
@@ -20,7 +26,7 @@ class BalancedDataGeneratorPreset(GeneratorPreset):
         )
 
         if self.verbose:
-            print(
+            logger.info(
                 f"[BalancedDataGeneratorPreset] Balancing data based on '{target_col}' using SMOTE..."
             )
 

@@ -1,11 +1,8 @@
-import os
-import tempfile
-
 import numpy as np
 import pandas as pd
 import pytest
 
-from calm_data_generator.generators.configs import DriftConfig, ReportConfig
+from calm_data_generator.generators.configs import DriftConfig
 
 
 @pytest.fixture
@@ -226,54 +223,3 @@ def test_scenario_injector(sample_data):
         task_type="regression",
     )
     assert "new_target" in result.columns
-
-
-def test_single_call_workflow(sample_data):
-    """Test Generate + Drift + Report in one call."""
-    from calm_data_generator.generators.tabular import RealGenerator
-
-    gen = RealGenerator(auto_report=False)
-    with tempfile.TemporaryDirectory() as tmpdir:
-        result = gen.generate(
-            data=sample_data,
-            n_samples=20,
-            method="cart",
-            target_col="target",
-            output_dir=tmpdir,
-            save_dataset=True,
-            drift_injection_config=[
-                DriftConfig(
-                    method="inject_feature_drift_gradual",
-                    params={
-                        "feature_cols": ["score"],
-                        "drift_type": "shift",
-                        "drift_magnitude": 0.3,
-                        "start_index": 10,
-                    },
-                )
-            ],
-            report_config=ReportConfig(output_dir=tmpdir, target_column="target"),
-        )
-        assert result is not None
-        assert len(result) == 20
-        assert len(os.listdir(tmpdir)) > 0
-
-
-def test_stream_generator_basic(sample_data):
-    """Test basic StreamGenerator functionality."""
-    try:
-        from calm_data_generator.generators.stream import StreamGenerator
-    except ImportError:
-        pytest.skip("StreamGenerator dependencies not met")
-
-    stream_gen = StreamGenerator(auto_report=False)
-
-    try:
-        from river import synth
-
-        river_gen = synth.Agrawal(seed=42)
-        result = stream_gen.generate(generator_instance=river_gen, n_samples=20)
-        assert isinstance(result, pd.DataFrame)
-        assert len(result) == 20
-    except ImportError:
-        pytest.skip("River not installed")

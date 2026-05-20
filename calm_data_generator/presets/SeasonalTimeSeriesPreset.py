@@ -1,10 +1,16 @@
-from typing import List, Dict, Optional
-import pandas as pd
+import logging
+from typing import Dict, List, Optional
+
 import numpy as np
-from .base import GeneratorPreset
-from calm_data_generator.generators.tabular import RealGenerator
-from calm_data_generator.generators.dynamics.ScenarioInjector import ScenarioInjector
+import pandas as pd
+
 from calm_data_generator.generators.configs import EvolutionFeatureConfig
+from calm_data_generator.generators.dynamics.ScenarioInjector import ScenarioInjector
+from calm_data_generator.generators.tabular import RealGenerator
+
+from .base import GeneratorPreset
+
+logger = logging.getLogger(__name__)
 
 
 class SeasonalTimeSeriesPreset(GeneratorPreset):
@@ -43,7 +49,7 @@ class SeasonalTimeSeriesPreset(GeneratorPreset):
         )
 
         if self.verbose:
-            print(
+            logger.info(
                 f"[SeasonalTimeSeriesPreset] 1. Generating base data using {method}..."
             )
 
@@ -66,7 +72,7 @@ class SeasonalTimeSeriesPreset(GeneratorPreset):
 
         # 2. Inject Seasonality using ScenarioInjector
         if self.verbose:
-            print(
+            logger.info(
                 f"[SeasonalTimeSeriesPreset] 2. Injecting sinusoidal seasonality (Period={period}, Amp={amplitude})..."
             )
 

@@ -1,5 +1,10 @@
-from .base import GeneratorPreset
+import logging
+
 from calm_data_generator.generators.dynamics.ScenarioInjector import ScenarioInjector
+
+from .base import GeneratorPreset
+
+logger = logging.getLogger(__name__)
 
 
 class ScenarioInjectorPreset(GeneratorPreset):
@@ -9,14 +14,11 @@ class ScenarioInjectorPreset(GeneratorPreset):
     """
 
     def generate(self, data, scenario_config, **kwargs):
-        # This preset behaves a bit differently: it modifies input data based on scenario
         injector = ScenarioInjector(seed=self.random_state)
 
         if self.verbose:
-            print("[ScenarioInjectorPreset] Applying scenario configuration...")
+            logger.info("[ScenarioInjectorPreset] Applying scenario configuration...")
 
-        # Use evolve_features or generic apply
-        # Use evolve_features or generic apply
         return injector.evolve_features(
             df=data, evolution_config=scenario_config.get("evolve_features")
         )

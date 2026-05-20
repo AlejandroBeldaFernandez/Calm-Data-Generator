@@ -1,31 +1,43 @@
 # CALM-Data-Generator - Synthetic Data Generation Library
 
-from calm_data_generator import presets
-from calm_data_generator.generators.clinical import ClinicalDataGenerator
-from calm_data_generator.generators.complex import ComplexGenerator
-from calm_data_generator.generators.drift import DriftInjector
-from calm_data_generator.generators.dynamics import CausalEngine, ScenarioInjector
-from calm_data_generator.generators.tabular import QualityReporter, RealGenerator
-
-# Optional imports that may fail
-try:
-    from calm_data_generator.generators.stream import StreamGenerator
-except ImportError:
-    StreamGenerator = None
-
 __version__ = "2.2.1"
 
 __all__ = [
-    # Generators
     "RealGenerator",
     "QualityReporter",
     "ClinicalDataGenerator",
     "ComplexGenerator",
     "StreamGenerator",
-    # Drift & dynamics
     "DriftInjector",
     "ScenarioInjector",
     "CausalEngine",
-    # Presets
     "presets",
 ]
+
+_lazy_map = {
+    "RealGenerator": ("calm_data_generator.generators.tabular", "RealGenerator"),
+    "QualityReporter": ("calm_data_generator.generators.tabular", "QualityReporter"),
+    "ClinicalDataGenerator": ("calm_data_generator.generators.clinical", "ClinicalDataGenerator"),
+    "ComplexGenerator": ("calm_data_generator.generators.complex", "ComplexGenerator"),
+    "DriftInjector": ("calm_data_generator.generators.drift", "DriftInjector"),
+    "ScenarioInjector": ("calm_data_generator.generators.dynamics", "ScenarioInjector"),
+    "CausalEngine": ("calm_data_generator.generators.dynamics", "CausalEngine"),
+    "presets": ("calm_data_generator", "presets"),
+}
+
+
+def __getattr__(name: str):
+    if name == "StreamGenerator":
+        try:
+            from calm_data_generator.generators.stream import StreamGenerator
+            return StreamGenerator
+        except ImportError:
+            return None
+
+    if name in _lazy_map:
+        module_path, attr = _lazy_map[name]
+        import importlib
+        mod = importlib.import_module(module_path)
+        return getattr(mod, attr)
+
+    raise AttributeError(f"module 'calm_data_generator' has no attribute {name!r}")

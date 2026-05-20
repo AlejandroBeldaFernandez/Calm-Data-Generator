@@ -1,9 +1,11 @@
-import pytest
-import pandas as pd
-import numpy as np
-import tempfile
-import os
 import json
+import os
+import tempfile
+
+import numpy as np
+import pandas as pd
+import pytest
+
 from calm_data_generator.generators.tabular.QualityReporter import QualityReporter
 
 
@@ -102,5 +104,4 @@ def test_quality_reporter_minimal_vs_full(data_pair):
             # But if YData fails (dependency), checking json is safer fallback for "something ran"
             assert os.path.exists(os.path.join(out_full, "report_results.json"))
         except Exception as e:
-            # If full report fails due to heavy deps missing, skip/warn but don't fail suite
-            print(f"Full report generation warning: {e}")
+            pytest.skip(f"Full report failed (likely missing heavy dep): {e}")

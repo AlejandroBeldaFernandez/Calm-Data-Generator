@@ -1,13 +1,19 @@
+import logging
 import os
-import pandas as pd
 import warnings
-from .StreamReporter import StreamReporter
-from .GeneratorFactory import GeneratorFactory, GeneratorType, GeneratorConfig
-from .StreamGenerator import StreamGenerator
+from typing import Any, Dict, List, Optional, Union
+
+import pandas as pd
+
+from calm_data_generator.generators.configs import DriftConfig, ReportConfig
 from calm_data_generator.generators.drift.DriftInjector import DriftInjector
 from calm_data_generator.generators.dynamics.ScenarioInjector import ScenarioInjector
-from calm_data_generator.generators.configs import DriftConfig, ReportConfig
-from typing import List, Dict, Optional, Any, Union
+
+from .GeneratorFactory import GeneratorConfig, GeneratorFactory, GeneratorType
+from .StreamGenerator import StreamGenerator
+from .StreamReporter import StreamReporter
+
+logger = logging.getLogger(__name__)
 
 
 # Suppress common warnings for cleaner output
@@ -286,7 +292,7 @@ class SyntheticBlockGenerator:
 
         df.to_csv(full_path, index=False)
 
-        print(f"Generated {total_samples} samples in {n_blocks} blocks at: {full_path}")
+        logger.info("Generated %d samples in %d blocks at: %s", total_samples, n_blocks, full_path)
 
         if generate_report:
             # Resolve ReportConfig

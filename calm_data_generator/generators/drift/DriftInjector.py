@@ -15,6 +15,7 @@ Key Features:
 - **Integrated Reporting**: Automatically generates detailed reports and visualizations comparing the original and drifted datasets.
 """
 
+import logging
 import os
 import warnings
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
@@ -24,7 +25,8 @@ import pandas as pd
 
 from calm_data_generator.generators.configs import DriftConfig
 from calm_data_generator.generators.utils.propagation import apply_func, propagate_numeric_drift
-from calm_data_generator.reports.QualityReporter import QualityReporter
+
+logger = logging.getLogger(__name__)
 
 # Suppress common warnings for cleaner output
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -101,6 +103,7 @@ class DriftInjector:
         self.auto_report = auto_report
         self.minimal_report = minimal_report
 
+        from calm_data_generator.reports.QualityReporter import QualityReporter
         self.reporter = QualityReporter(minimal=minimal_report)
 
         if self.output_dir:
@@ -1771,7 +1774,7 @@ class DriftInjector:
                 except Exception as e:
                     warnings.warn(f"Failed to apply {method_name}: {e}")
             else:
-                print(f"Method {method_name} not found")
+                logger.warning("Method %s not found", method_name)
 
         if self.auto_report:
             gen_name = generator_name or self.generator_name
@@ -2214,6 +2217,7 @@ class DriftInjector:
             _out = output_dir or self.output_dir
             _name = generator_name or self.generator_name or "DriftInjector"
             try:
+                from calm_data_generator.reports.QualityReporter import QualityReporter
                 reporter = QualityReporter(verbose=True, minimal=self.minimal_report)
                 reporter.update_report_after_drift(
                     original_df=df,
@@ -2331,6 +2335,7 @@ class DriftInjector:
             _out = output_dir or self.output_dir
             _name = generator_name or self.generator_name or "DriftInjector"
             try:
+                from calm_data_generator.reports.QualityReporter import QualityReporter
                 affected = [c for c in dag_config if c in df_result.columns]
                 reporter = QualityReporter(verbose=True, minimal=self.minimal_report)
                 reporter.update_report_after_drift(

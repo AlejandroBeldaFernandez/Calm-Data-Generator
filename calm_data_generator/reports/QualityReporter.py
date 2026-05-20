@@ -18,16 +18,6 @@ from typing import Any, Dict, List, Optional, Union
 import numpy as np
 import pandas as pd
 
-sc = None
-ad = None
-try:
-    import anndata as ad
-    import scanpy as sc
-    from scgft_evaluator import ScGFT_Evaluator
-    SCGFT_AVAILABLE = True
-except ImportError:
-    SCGFT_AVAILABLE = False
-
 try:
     from sklearn.cluster import KMeans
     from sklearn.metrics import adjusted_rand_score
@@ -35,31 +25,12 @@ try:
 except ImportError:
     SKLEARN_AVAILABLE = False
 
-from calm_data_generator.generators.configs import ReportConfig  # noqa: E402
-from calm_data_generator.reports.base import BaseReporter  # noqa: E402
-from calm_data_generator.reports.DiscriminatorReporter import DiscriminatorReporter  # noqa: E402
-from calm_data_generator.reports.ExternalReporter import ExternalReporter  # noqa: E402
-from calm_data_generator.reports.LocalIndexGenerator import LocalIndexGenerator  # noqa: E402
-from calm_data_generator.reports.Visualizer import Visualizer  # noqa: E402
-
-# Direct usage of sdmetrics
-try:
-    from sdmetrics.reports.single_table import QualityReport
-
-    SDMETRICS_AVAILABLE = True
-except ImportError:
-    SDMETRICS_AVAILABLE = False
-
-# Sequential quality report (optional, may not be available in all versions)
-try:
-    from sdmetrics.reports.sequential import (
-        QualityReport as SequentialQualityReport,
-    )
-
-    SEQUENTIAL_SDMETRICS_AVAILABLE = True
-except ImportError:
-    SEQUENTIAL_SDMETRICS_AVAILABLE = False
-
+from calm_data_generator.generators.configs import ReportConfig
+from calm_data_generator.reports.base import BaseReporter
+from calm_data_generator.reports.DiscriminatorReporter import DiscriminatorReporter
+from calm_data_generator.reports.ExternalReporter import ExternalReporter
+from calm_data_generator.reports.LocalIndexGenerator import LocalIndexGenerator
+from calm_data_generator.reports.Visualizer import Visualizer
 
 logger = logging.getLogger("QualityReporter")
 
@@ -213,11 +184,11 @@ class QualityReporter(BaseReporter):
         # Let's say config wins for this execution.
 
         if self.verbose:
-            print("=" * 80)
-            print("COMPREHENSIVE REAL DATA GENERATION REPORT")
-            print(f"Generator: {generator_name}")
-            print(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            print("=" * 80)
+            logger.info(
+                "COMPREHENSIVE REAL DATA GENERATION REPORT | Generator: %s | Timestamp: %s",
+                generator_name,
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            )
 
         os.makedirs(output_dir, exist_ok=True)
 
@@ -304,7 +275,7 @@ class QualityReporter(BaseReporter):
         LocalIndexGenerator.create_index(output_dir)
 
         if self.verbose:
-            print(f"\nReport generated at: {output_dir}")
+            logger.info("Report generated at: %s", output_dir)
 
     def _run_quality_assessment(
         self,
@@ -323,7 +294,12 @@ class QualityReporter(BaseReporter):
         sdmetrics_quality = self._assess_quality_scores(real_df_for_report, synthetic_df_for_report)
 
         sequential_quality = None
-        if final_time_col and block_column and SEQUENTIAL_SDMETRICS_AVAILABLE:
+        _seq_available = True
+        try:
+            from sdmetrics.reports.sequential import QualityReport as _  # noqa: F401
+        except ImportError:
+            _seq_available = False
+        if final_time_col and block_column and _seq_available:
             sequential_quality = self._assess_sequential_quality(
                 real_df, synthetic_df, block_column, final_time_col
             )
@@ -334,7 +310,7 @@ class QualityReporter(BaseReporter):
 
         if "overall_quality_score" in sdmetrics_quality:
             if self.verbose:
-                print("\nGenerating Quality Scores Card...")
+                logger.info("Generating Quality Scores Card...")
             Visualizer.generate_quality_scores_card(
                 overall_score=sdmetrics_quality["overall_quality_score"],
                 weighted_score=sdmetrics_quality["weighted_quality_score"],
@@ -356,7 +332,7 @@ class QualityReporter(BaseReporter):
     ) -> None:
         """Generates Plotly visualizations: density, PCA, comparison, discriminator."""
         if self.verbose:
-            print("\nGenerating Plotly Visualizations...")
+            logger.info("Generating Plotly Visualizations...")
 
         Visualizer.generate_density_plots(
             df=synthetic_df_for_report,
@@ -379,10 +355,10 @@ class QualityReporter(BaseReporter):
                 color_col="_source",
             )
         elif self.verbose:
-            print("   -> Skipping PCA/UMAP (minimal mode)")
+            logger.info("Skipping PCA/UMAP (minimal mode)")
 
         if use_minimal and self.verbose:
-            print("   -> Skipping full quality assessment (minimal mode)")
+            logger.info("Skipping full quality assessment (minimal mode)")
 
         Visualizer.generate_comparison_plots(
             original_df=real_df_for_report,
@@ -415,7 +391,7 @@ class QualityReporter(BaseReporter):
     ) -> None:
         """Generates YData Profiling comparison and per-block reports."""
         if self.verbose:
-            print("\nGenerating YData Reports...")
+            logger.info("Generating YData Reports...")
 
         ExternalReporter.generate_comparison(
             ref_df=real_df_for_report,
@@ -440,7 +416,7 @@ class QualityReporter(BaseReporter):
 
         if block_column and block_column in real_df_for_report.columns:
             if self.verbose:
-                print(f"\nGenerating Per-Block Reports (Block Col: {block_column})...")
+                logger.info("Generating Per-Block Reports (Block Col: %s)...", block_column)
 
             blocks = sorted(real_df_for_report[block_column].unique(), key=str)
             blocks_dir = os.path.join(output_dir, "blocks_reports")
@@ -514,17 +490,19 @@ class QualityReporter(BaseReporter):
         self, real_df: pd.DataFrame, synthetic_df: pd.DataFrame
     ) -> Dict[str, Any]:
         """Assesses the quality of synthetic data using SDMetrics."""
-        if not SDMETRICS_AVAILABLE:
+        try:
+            from sdmetrics.reports.single_table import QualityReport
+        except ImportError:
             return {"error": "SDMetrics not available"}
 
         try:
             if self.verbose:
-                print("\nRunning SDMetrics Quality Assessment...")
+                logger.info("Running SDMetrics Quality Assessment...")
 
             common_cols = list(set(real_df.columns) & set(synthetic_df.columns))
             if len(common_cols) < len(real_df.columns) and self.verbose:
                 dropped = set(real_df.columns) - set(common_cols)
-                print(f"   -> Aligning columns for (dropped: {dropped})")
+                logger.info("Aligning columns (dropped: %s)", dropped)
 
             real_aligned = real_df[common_cols]
             synth_aligned = synthetic_df[common_cols]
@@ -540,8 +518,10 @@ class QualityReporter(BaseReporter):
             )
 
             if self.verbose:
-                print(
-                    f"SDMetrics Assessment complete. Overall: {overall_score:.2f}, Weighted: {weighted_score:.2f}"
+                logger.info(
+                    "SDMetrics Assessment complete. Overall: %.2f, Weighted: %.2f",
+                    overall_score,
+                    weighted_score,
                 )
 
             return {
@@ -562,7 +542,9 @@ class QualityReporter(BaseReporter):
         """
         Calculates  quality scores for each block.
         """
-        if not SDMETRICS_AVAILABLE:
+        try:
+            from sdmetrics.reports.single_table import QualityReport
+        except ImportError:
             return []
 
         scores = []
@@ -663,7 +645,7 @@ class QualityReporter(BaseReporter):
         Applies resampling/aggregation based on time or block column.
         """
         if self.verbose:
-            print(f"Applying resampling rule: {resample_rule}")
+            logger.info("Applying resampling rule: %s", resample_rule)
 
         def agg_mode(x):
             m = x.mode()
@@ -699,12 +681,14 @@ class QualityReporter(BaseReporter):
 
     def _assess_sequential_quality(self, real_df, synthetic_df, entity_col, time_col):
         """Assess quality of sequential data using SDMetrics."""
-        if not SEQUENTIAL_SDMETRICS_AVAILABLE:
+        try:
+            from sdmetrics.reports.sequential import QualityReport as SequentialQualityReport
+        except ImportError:
             return None
 
         try:
             if self.verbose:
-                print("\nRunning Sequential Quality Assessment...")
+                logger.info("Running Sequential Quality Assessment...")
 
             # Prepare metadata dict for SDMetrics
             # We need to construct it manually if SingleTableMetadata doesn't support sequential well directly
@@ -745,7 +729,7 @@ class QualityReporter(BaseReporter):
         """
         try:
             if self.verbose:
-                print("\nCalculating Privacy Metrics (DCR)...")
+                logger.info("Calculating Privacy Metrics (DCR)...")
 
             # preprocessing: dummy encoding for categorical, fillna for numeric
             # Use only numeric for simplicity in DCR or simple encoding
@@ -806,7 +790,7 @@ class QualityReporter(BaseReporter):
 
         try:
             if self.verbose:
-                print("Calculating ARI metrics (class separability)...")
+                logger.info("Calculating ARI metrics (class separability)...")
 
             def get_ari(df, t_col):
                 features = df.select_dtypes(include=[np.number]).drop(columns=[t_col], errors='ignore')
@@ -842,15 +826,20 @@ class QualityReporter(BaseReporter):
         """
         Runs the scGFT_evaluador single-cell validation and saves output to HTML.
         """
-        if not SCGFT_AVAILABLE:
+        try:
+            import anndata as ad
+            import scanpy as sc
+            from scgft_evaluator import ScGFT_Evaluator
+        except ImportError:
             if self.verbose:
-                print("\n[WARNING] scgft-evaluator not found. Install with: pip install git+https://github.com/nasim23ea/scgft-evaluator.git")
+                logger.warning(
+                    "scgft-evaluator not found. "
+                    "Install with: pip install git+https://github.com/nasim23ea/scgft-evaluator.git"
+                )
             return
 
         if self.verbose:
-            print("\n" + "="*40)
-            print("RUNNING scGFT SINGLE-CELL EVALUATION")
-            print("="*40)
+            logger.info("RUNNING scGFT SINGLE-CELL EVALUATION")
 
         try:
             # 1. Convert to AnnData
@@ -872,7 +861,7 @@ class QualityReporter(BaseReporter):
 
             # 2. Basic Preprocessing for scvi metrics (PCA is required)
             if self.verbose:
-                print("   -> Preprocessing AnnData (PCA)...")
+                logger.info("Preprocessing AnnData (PCA)...")
 
             sc.pp.pca(adata_real)
             sc.pp.pca(adata_synth)
@@ -901,8 +890,7 @@ class QualityReporter(BaseReporter):
             output_text = f.getvalue()
 
             if self.verbose:
-                print(output_text)
-                print(results.to_string(index=False))
+                logger.info("scGFT output:\n%s\n%s", output_text, results.to_string(index=False))
 
             # 4. Save to HTML Report
             scgft_report_path = os.path.join(output_dir, "scgft_report.html")
@@ -944,9 +932,7 @@ class QualityReporter(BaseReporter):
                 html_file.write(html_content)
 
             if self.verbose:
-                print(f"   -> scGFT report saved to: {scgft_report_path}")
+                logger.info("scGFT report saved to: %s", scgft_report_path)
 
         except Exception as e:
-            logger.error(f"scGFT evaluation failed: {e}")
-            if self.verbose:
-                print(f"   -> [ERROR] scGFT evaluation failed: {e}")
+            logger.error("scGFT evaluation failed: %s", e)

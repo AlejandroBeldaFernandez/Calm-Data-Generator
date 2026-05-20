@@ -1,8 +1,12 @@
+import logging
+
 import pandas as pd
-import numpy as np
-from typing import Dict, Union, Any, Optional, List
-from .base import GeneratorPreset
+
 from calm_data_generator.generators.tabular import RealGenerator
+
+from .base import GeneratorPreset
+
+logger = logging.getLogger(__name__)
 
 
 class ImbalancedGeneratorPreset(GeneratorPreset):
@@ -21,27 +25,17 @@ class ImbalancedGeneratorPreset(GeneratorPreset):
         imbalance_ratio: float = 0.1,
         **kwargs,
     ) -> pd.DataFrame:
-        """
-        Generates imbalanced data.
-
-        Args:
-            target_col: The column to imbalance.
-            imbalance_ratio: The ratio of the minority class (0.0 to 1.0).
-                             e.g., 0.1 means minority class will be 10% of data.
-        """
         gen = RealGenerator(
             auto_report=kwargs.pop("auto_report", False), random_state=self.random_state
         )
 
-        # Infer minority/majority classes if not provided
-        # This is a simplification; for complex cases user should pass custom_distributions dict directly
         unique_vals = data[target_col].unique()
         if len(unique_vals) != 2:
             raise ValueError(
-                "ImbalancedGeneratorPreset currently supports binary targets only."
+                f"ImbalancedGeneratorPreset requires a binary target column, "
+                f"but '{target_col}' has {len(unique_vals)} unique values."
             )
 
-        # Arbitrarily pick one as minority if not specified (or use logic)
         minority_class = unique_vals[1]
         majority_class = unique_vals[0]
 
@@ -57,13 +51,10 @@ class ImbalancedGeneratorPreset(GeneratorPreset):
         custom_dist.update(user_dists)
 
         if self.verbose:
-            print(
-                f"[ImbalancedGeneratorPreset] Generating imbalanced data (ratio {imbalance_ratio}) for '{target_col}'..."
-            )
-
-        if self.verbose:
-            print(
-                f"[ImbalancedGeneratorPreset] Generating imbalanced data (ratio {imbalance_ratio}) for '{target_col}'..."
+            logger.info(
+                "[ImbalancedGeneratorPreset] Generating imbalanced data (ratio %s) for '%s'...",
+                imbalance_ratio,
+                target_col,
             )
 
         # Enforce CTGAN for this preset

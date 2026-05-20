@@ -28,13 +28,6 @@ try:
 except ImportError:
     SKLEARN_AVAILABLE = False
 
-try:
-    import umap
-
-    UMAP_AVAILABLE = True
-except ImportError:
-    UMAP_AVAILABLE = False
-
 logger = logging.getLogger("Visualizer")
 
 

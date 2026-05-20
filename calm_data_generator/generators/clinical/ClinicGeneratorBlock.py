@@ -1,16 +1,16 @@
+import logging
 import os
-import pandas as pd
-from typing import List, Dict, Optional, Any
+from typing import Any, Dict, List, Optional, Union
 
-from calm_data_generator.generators.drift.DriftInjector import DriftInjector
-from calm_data_generator.generators.dynamics.ScenarioInjector import ScenarioInjector
-from calm_data_generator.generators.clinical.Clinic import (
-    ClinicalDataGenerator,
-    DateConfig,
-)
+import pandas as pd
+
+from calm_data_generator.generators.clinical.Clinic import ClinicalDataGenerator, DateConfig
 from calm_data_generator.generators.clinical.ClinicReporter import ClinicReporter
 from calm_data_generator.generators.configs import DriftConfig, ReportConfig
-from typing import Union
+from calm_data_generator.generators.drift.DriftInjector import DriftInjector
+from calm_data_generator.generators.dynamics.ScenarioInjector import ScenarioInjector
+
+logger = logging.getLogger(__name__)
 
 
 class ClinicalDataGeneratorBlock:
@@ -141,7 +141,7 @@ class ClinicalDataGeneratorBlock:
             )
 
         df.to_csv(full_path, index=False)
-        print(f"Generated {total_samples} samples in {n_blocks} blocks at: {full_path}")
+        logger.info("Generated %d samples in %d blocks at: %s", total_samples, n_blocks, full_path)
 
         if generate_report:
             # Resolve ReportConfig

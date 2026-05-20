@@ -1,6 +1,12 @@
+import logging
+
 import pandas as pd
-from .base import GeneratorPreset
+
 from calm_data_generator.generators.tabular import RealGenerator
+
+from .base import GeneratorPreset
+
+logger = logging.getLogger(__name__)
 
 
 class DiffusionPreset(GeneratorPreset):
@@ -15,7 +21,7 @@ class DiffusionPreset(GeneratorPreset):
         )
 
         if self.verbose:
-            print(
+            logger.info(
                 "[DiffusionPreset] Generating data using TabDDPM (Diffusion Model)..."
             )
 

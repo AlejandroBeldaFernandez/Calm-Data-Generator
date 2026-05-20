@@ -1,6 +1,11 @@
-from .base import GeneratorPreset
-from calm_data_generator.generators.tabular import RealGenerator
+import logging
+
 from calm_data_generator.generators.configs import DriftConfig
+from calm_data_generator.generators.tabular import RealGenerator
+
+from .base import GeneratorPreset
+
+logger = logging.getLogger(__name__)
 
 
 class ConceptDriftPreset(GeneratorPreset):
@@ -25,7 +30,7 @@ class ConceptDriftPreset(GeneratorPreset):
         )
 
         if self.verbose:
-            print(
+            logger.info(
                 f"[ConceptDriftPreset] Injecting concept drift into '{target_col}'..."
             )
 

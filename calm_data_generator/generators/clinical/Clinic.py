@@ -234,9 +234,9 @@ class ClinicalDataGenerator(ComplexGenerator):
                 time_col=time_col if time_col in df.columns else None,
                 drift_config=drift_config,
             )
-            print(f"✅ Generated report for {name} in {report_dir}")
+            logger.info("Generated report for %s in %s", name, report_dir)
         except Exception as e:
-            print(f"⚠️ Failed to generate report for {name}: {e}")
+            logger.warning("Failed to generate report for %s: %s", name, e)
 
     def _design_gene_params_rnaseq(self, n_genes, gene_mean_log_center):
         """
@@ -1058,7 +1058,7 @@ class ClinicalDataGenerator(ComplexGenerator):
             omics_data_df.index
         )
         if patient_ids_to_modify.empty:
-            print("No matching patient IDs. Returning original omics_data_df.")
+            logger.warning("No matching patient IDs. Returning original omics_data_df.")
             return omics_data_df
 
         # --- 3. Prepare Omics Subset ---
@@ -1184,7 +1184,7 @@ class ClinicalDataGenerator(ComplexGenerator):
         """
         Generates longitudinal clinical data (multi-visit).
         """
-        print("Generating longitudinal clinical data...")
+        logger.info("Generating longitudinal clinical data...")
 
         # 1. Generate base line data (Visit 0)
         base_data = self.generate(n_samples=n_samples, **kwargs)
@@ -1649,9 +1649,10 @@ def replicate_genes_proteins(
     n_genes = int(100 * factor_escala)  # Reduced for clarity in example
     n_proteins = int(60 * factor_escala)
 
-    print(f"--- STARTING {mode.upper()} LONGITUDINAL SIMULATION (T1 & T2) ---")
-    print(f"Simulating T1 (50/50) and T2 (Drift) for {n_samples} patients.")
-    print(f"Genes: {n_genes}, Proteins: {n_proteins}")
+    logger.info(
+        "STARTING %s LONGITUDINAL SIMULATION (T1 & T2) | %d patients | Genes: %d, Proteins: %d",
+        mode.upper(), n_samples, n_genes, n_proteins,
+    )
 
     # --- 1. Demographic Generation (T1) ---
     df_demo_t1, raw_demo_t1 = generator.generate_demographic_data(
@@ -1760,7 +1761,7 @@ def replicate_genes_proteins(
     fill_block(protein_correlations, protein_indices_modB, [0.4, 0.6])
 
     # --- 3. Generate T1 Data ---
-    print("\n--- Generating T1 Data ---")
+    logger.info("Generating T1 Data...")
     df_genes_t1 = generator.generate_gene_data(
         n_genes=n_genes,
         gene_type=mode,
@@ -1804,12 +1805,10 @@ def replicate_genes_proteins(
     df_proteins_t1.to_csv(
         os.path.join(output_dir, f"dataset_proteins_t1_{mode}.csv"), index=True
     )
-    print(f"T1 files saved to: {output_dir}")
+    logger.info("T1 files saved to: %s", output_dir)
 
     # --- 5. T2 DRIFT GENERATION ---
-    print("\n" + "=" * 50)
-    print("  STEP 5: GENERATING DRIFT TO T2")
-    print("=" * 50)
+    logger.info("STEP 5: GENERATING DRIFT TO T2")
 
     idx_control_t1 = df_demo_t1[df_demo_t1["Group"] == "Control"].index
     n_control_to_disease = len(idx_control_t1) // 2
@@ -1820,13 +1819,15 @@ def replicate_genes_proteins(
     df_demo_t2 = df_demo_t1.copy()
     df_demo_t2.loc[idx_transicion, "Group"] = "Disease"
 
-    print(
-        f"T2 Cohort: {len(df_demo_t2[df_demo_t2['Group'] == 'Control'])} control, {len(df_demo_t2[df_demo_t2['Group'] == 'Disease'])} disease."
+    logger.info(
+        "T2 Cohort: %d control, %d disease. %d patients transitioned.",
+        len(df_demo_t2[df_demo_t2["Group"] == "Control"]),
+        len(df_demo_t2[df_demo_t2["Group"] == "Disease"]),
+        len(idx_transicion),
     )
-    print(f"{len(idx_transicion)} patients transitioned from Control to Disease.")
 
     # --- 6. Generate T2 Data (with new demographic context) ---
-    print("\n--- Generating T2 Data (with drift) ---")
+    logger.info("Generating T2 Data (with drift)...")
     df_genes_t2 = generator.generate_gene_data(
         n_genes=n_genes,
         gene_type=mode,
@@ -1890,7 +1891,6 @@ def replicate_genes_proteins(
         os.path.join(output_dir, f"dataset_proteins_t2_{mode}.csv"), index=True
     )
 
-    print(f"\nT2 files saved to: {output_dir}")
-    print("\n--- LONGITUDINAL SIMULATION COMPLETED! ---")
+    logger.info("T2 files saved to: %s | LONGITUDINAL SIMULATION COMPLETED", output_dir)
 
     return df_demo_t2, df_genes_t2, df_proteins_t2
