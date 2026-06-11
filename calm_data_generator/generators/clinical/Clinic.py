@@ -550,8 +550,7 @@ class ClinicalDataGenerator(ComplexGenerator):
                 for col in raw_demographic_data.columns:
                     if (
                         col != demographic_id_col
-                        and col != "Group"
-                        and col != "Binary_Group"
+                        and col not in ClinicalDataGenerator._EXCLUDED_DEMO_COLS
                     ):
                         if pd.api.types.is_numeric_dtype(raw_demographic_data[col]):
                             if raw_demographic_data[col].nunique() <= 2:
@@ -656,8 +655,7 @@ class ClinicalDataGenerator(ComplexGenerator):
                 c
                 for c in raw_demographic_data.columns
                 if c != demographic_id_col
-                and c != "Group"
-                and c != "Binary_Group"
+                and c not in ClinicalDataGenerator._EXCLUDED_DEMO_COLS
                 and pd.api.types.is_numeric_dtype(raw_demographic_data[c])
             ]
             conditioning_data = raw_demographic_data[cond_cols].values
@@ -860,7 +858,9 @@ class ClinicalDataGenerator(ComplexGenerator):
             cond_cols = [
                 c
                 for c in raw_demographic_data.columns
-                if c != demographic_id_col and c != "Group"
+                if c != demographic_id_col
+                and c not in ClinicalDataGenerator._EXCLUDED_DEMO_COLS
+                and pd.api.types.is_numeric_dtype(raw_demographic_data[c])
             ]
             conditioning_data = raw_demographic_data[cond_cols].values
 

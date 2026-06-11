@@ -301,7 +301,7 @@ corr_matrix = build_correlation_matrix(
     group_sizes=[n_A, n_B, n_noise],
     correlations=[
         {"internal": 0.6, "demo_idx": "Age",  "demo_corr": 0.3},  # Group A corr with Age
-        {"internal": 0.5, "demo_idx": None,   "demo_corr": 0.0},  # Group B independent
+        {"internal": 0.5},                                          # Group B independent
         {"internal": 0.0},                                          # Noise group
     ],
     demo_col_names=demo_col_names,
