@@ -23,6 +23,20 @@ class ClinicalDataGenerator(ComplexGenerator):
     A class to generate synthetic clinical data including demographic, gene expression, and protein data.
     """
 
+    _EXCLUDED_DEMO_COLS = {"Group", "Binary_Group", "Disease_Subgroup"}
+
+    @staticmethod
+    def get_conditioning_columns(raw_demographic_data: "pd.DataFrame",
+                                  demographic_id_col: str = "Patient_ID") -> list:
+        """Returns the ordered list of numeric demographic columns used as conditioning input.
+        Use len() of this list as n_demo when calling build_correlation_matrix."""
+        return [
+            c for c in raw_demographic_data.columns
+            if c != demographic_id_col
+            and c not in ClinicalDataGenerator._EXCLUDED_DEMO_COLS
+            and pd.api.types.is_numeric_dtype(raw_demographic_data[c])
+        ]
+
     def __init__(self, seed=42, auto_report=True, minimal_report=False):
         """
         Initializes the ClinicalDataGenerator with a given random seed for reproducibility.

@@ -4,10 +4,22 @@ from calm_data_generator.generators.clinical.Clinic import ClinicalDataGenerator
 from calm_data_generator.generators.configs import DriftConfig
 
 
-def build_correlation_matrix(n_demo, group_sizes, correlations):
+def build_correlation_matrix(n_demo, group_sizes, correlations,
+                              demo_col_names: list = None):
     """
-    Helper to build a block correlation matrix.
-    Supports fixed values or ranges (min, max) for internal correlations.
+    Helper to build a block correlation matrix for ClinicalDataGenerator.
+
+    Args:
+        n_demo: Number of demographic conditioning columns. Use
+            len(ClinicalDataGenerator.get_conditioning_columns(raw_demo)) to get
+            the correct value after calling generate_demographic_data().
+        group_sizes: List of gene group sizes, e.g. [n_A, n_B, n_noise].
+        correlations: List of dicts, one per group:
+            - "internal": float or (min, max) range for intra-group correlation
+            - "demo_idx": int index OR str column name of the demographic variable
+            - "demo_corr": float correlation between this group and that demographic
+        demo_col_names: Optional list of column names in the same order as the
+            demographic conditioning columns. Required when demo_idx is a string.
     """
     n_omics = sum(group_sizes)
     n_total = n_demo + n_omics
@@ -21,7 +33,6 @@ def build_correlation_matrix(n_demo, group_sizes, correlations):
         # Internal correlation
         if "internal" in config:
             internal_val = config["internal"]
-            # Handle range (tuple or list)
             if isinstance(internal_val, (tuple, list)) and len(internal_val) == 2:
                 val = np.random.uniform(internal_val[0], internal_val[1])
             else:
@@ -33,13 +44,24 @@ def build_correlation_matrix(n_demo, group_sizes, correlations):
                 np.fill_diagonal(block, 1.0)
                 matrix[current_idx:end_idx, current_idx:end_idx] = block
 
-        # Demographic correlation
+        # Demographic correlation — accepts int index or column name string
         if "demo_idx" in config and "demo_corr" in config:
             demo_idx = config["demo_idx"]
-            corr = config["demo_corr"]
+            corr_val = config["demo_corr"]
             if demo_idx is not None:
-                matrix[demo_idx, current_idx:end_idx] = corr
-                matrix[current_idx:end_idx, demo_idx] = corr
+                if isinstance(demo_idx, str):
+                    if demo_col_names is None:
+                        raise ValueError(
+                            "demo_col_names must be provided when demo_idx is a column name. "
+                            "Pass ClinicalDataGenerator.get_conditioning_columns(raw_demo)."
+                        )
+                    if demo_idx not in demo_col_names:
+                        raise ValueError(
+                            f"Column '{demo_idx}' not found in demo_col_names {demo_col_names}."
+                        )
+                    demo_idx = demo_col_names.index(demo_idx)
+                matrix[demo_idx, current_idx:end_idx] = corr_val
+                matrix[current_idx:end_idx, demo_idx] = corr_val
 
         current_idx = end_idx
 
@@ -67,27 +89,26 @@ def run_tutorial():
         "Sex": {"distribution": "binom", "n": 1, "p": 0.5},
     }
 
-    # Correlations Config
-    # We need to pre-calculate dimensions to build matrix, this part remains "advanced"
-    # But passing it is now cleaner.
-    # Note: Using indexes requires knowing column order.
-    # For tutorial simplicity, we'll verify this order or assume it.
-    col_to_idx = {"Age": 0, "Sex": 1}  # Simplified assumption for tutorial
-    n_demo = 2
+    # Generate demographics once to discover the exact conditioning column names and count.
+    # generator.generate() will regenerate them internally — this call is only to inspect
+    # the column structure so we can build the correlation matrix with the right dimensions.
+    demo_df_tmp, raw_demo_tmp = generator.generate_demographic_data(
+        n_samples=10,  # small — only need column structure
+        custom_demographic_columns=custom_demo_cols,
+    )
+    demo_col_names = ClinicalDataGenerator.get_conditioning_columns(raw_demo_tmp)
+    n_demo = len(demo_col_names)  # derived automatically — no hardcoding
 
     gene_group_sizes = [100, 200, 500]
     gene_correlations_config = [
-        {"internal": (0.3, 0.5), "demo_idx": col_to_idx.get("Age"), "demo_corr": 0.4},
-        {
-            "internal": 0.3,
-            "demo_idx": None,
-            "demo_corr": 0.0,
-        },  # Sex mapped to Sex_Binario internally?
+        {"internal": (0.3, 0.5), "demo_idx": "Age", "demo_corr": 0.4},
+        {"internal": 0.3, "demo_idx": None, "demo_corr": 0.0},
         {"internal": 0.0},
     ]
 
     gene_corr_matrix = build_correlation_matrix(
-        n_demo, gene_group_sizes, gene_correlations_config
+        n_demo, gene_group_sizes, gene_correlations_config,
+        demo_col_names=demo_col_names,
     )
 
     # Weights for Target Variable (Diagnosis)

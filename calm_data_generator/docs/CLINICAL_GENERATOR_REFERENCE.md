@@ -85,12 +85,12 @@ data = gen.generate(
     n_proteins=200,
     control_disease_ratio=0.5,
     date_config=DateConfig(start_date="2024-01-01"),
-    
+
     # Drift Configuration (using DriftConfig objects)
     demographics_drift_config=[
         DriftConfig(method="inject_feature_drift", feature_cols=["Age"], magnitude=0.5)
     ],
-    
+
     # Detailed configurations
     demographic_correlations=None,
     gene_correlations=None,
@@ -188,7 +188,7 @@ You can pass configuration dictionaries directly to the internal injectors:
 Example:
 ```python
 drift_conf = DriftConfig(
-    method="inject_feature_drift_gradual", 
+    method="inject_feature_drift_gradual",
     params={"feature_cols": ["Age"], "drift_magnitude": 0.5}
 )
 
@@ -264,5 +264,84 @@ data = gen.generate(
         "BP":  {"dist": "normal", "loc": 120, "scale": 15}
     },
     demographic_correlations=corr_matrix
+)
+```
+
+---
+
+## Gene-Demographic Correlation Matrix
+
+Use `demographic_gene_correlations` to specify correlations between demographic variables and gene groups. The matrix must have dimensions `(n_demo + n_genes) × (n_demo + n_genes)`, where `n_demo` is the number of numeric demographic conditioning columns — **not** the number of custom columns you passed.
+
+### Getting the correct n_demo
+
+The safest way is to call `get_conditioning_columns()` after generating a small demographic sample:
+
+```python
+from calm_data_generator.generators.clinical.Clinic import ClinicalDataGenerator
+from calm_data_generator.tutorials.clinical_generator import build_correlation_matrix
+
+gen = ClinicalDataGenerator(seed=42, auto_report=False)
+
+custom_demo = {
+    "Age": {"distribution": "truncnorm", "a": -2, "b": 2.5, "loc": 60, "scale": 10},
+    "Sex": {"distribution": "binom", "n": 1, "p": 0.5},
+}
+
+# Step 1: discover the exact conditioning columns
+_, raw_demo_tmp = gen.generate_demographic_data(n_samples=10, custom_demographic_columns=custom_demo)
+demo_col_names = ClinicalDataGenerator.get_conditioning_columns(raw_demo_tmp)
+n_demo = len(demo_col_names)
+# demo_col_names → ['Age', 'Sex_Binario']  (Sex is stored as Sex_Binario internally)
+
+# Step 2: build the matrix using column names — no index arithmetic needed
+n_A, n_B, n_noise = 20, 20, 10
+corr_matrix = build_correlation_matrix(
+    n_demo,
+    group_sizes=[n_A, n_B, n_noise],
+    correlations=[
+        {"internal": 0.6, "demo_idx": "Age",  "demo_corr": 0.3},  # Group A corr with Age
+        {"internal": 0.5, "demo_idx": None,   "demo_corr": 0.0},  # Group B independent
+        {"internal": 0.0},                                          # Noise group
+    ],
+    demo_col_names=demo_col_names,
+)
+
+# Step 3: generate
+data = gen.generate(
+    n_samples=500,
+    n_genes=n_A + n_B + n_noise,
+    n_proteins=0,
+    custom_demographic_columns=custom_demo,
+    gene_type="RNA-Seq",
+    demographic_gene_correlations=corr_matrix,
+    target_variable_config={
+        "weights": {"Age": 0.3, "G_0": 0.1, "G_1": 0.1},
+        "binary_threshold": "median",
+        "name": "diagnosis",
+    },
+    save_dataset=False,
+)
+```
+
+### Why not hardcode n_demo?
+
+`generate_demographic_data()` may add or rename columns internally (e.g. `Sex` → `Sex_Binario`). The conditioning columns exclude non-numeric and internal columns (`Binary_Group`, `Disease_Subgroup`). If `n_demo` doesn't match the actual column count, generation raises:
+
+```
+ValueError: full_covariance shape (N, N) mismatch with total variables M
+```
+
+### build_correlation_matrix reference
+
+```python
+build_correlation_matrix(
+    n_demo,               # int — use len(get_conditioning_columns(raw_demo))
+    group_sizes,          # list[int] — number of genes per group, e.g. [20, 20, 10]
+    correlations,         # list[dict] — one entry per group:
+                          #   "internal": float or (min, max) range
+                          #   "demo_idx": int index OR str column name (requires demo_col_names)
+                          #   "demo_corr": float
+    demo_col_names=None,  # list[str] — required when demo_idx is a string
 )
 ```
