@@ -123,6 +123,7 @@ class ClinicalDataGenerator(
             drift_injection_config=kwargs.get("genes_drift_config"),
             dynamics_config=kwargs.get("genes_dynamics_config"),
             disease_effects_config=kwargs.get("disease_effects_config"),
+            gene_groups=kwargs.get("gene_groups"),
         )
 
         # 4. Generate Proteins
@@ -154,6 +155,21 @@ class ClinicalDataGenerator(
                 y_name = target_config.get("name", "Y")
                 Y.name = y_name
                 demo_df[y_name] = Y
+
+                # A configured target variable Y replaces Group/Disease_Subgroup as
+                # "the" target: those columns were only the internal driver used to
+                # decide which patients got disease_effects_config applied, and having
+                # both around invites exactly the mix-up of using the wrong one as target.
+                internal_label_cols = [
+                    c for c in ("Group", "Disease_Subgroup") if c in demo_df.columns
+                ]
+                if internal_label_cols:
+                    demo_df = demo_df.drop(columns=internal_label_cols)
+                    logger.info(
+                        "Dropped internal label column(s) %s from demographics now that "
+                        "target variable '%s' is available.", internal_label_cols, y_name,
+                    )
+
                 res["demographics"] = demo_df
                 logger.info("Target variable '%s' generated and added to demographics.", y_name)
             except Exception as e:

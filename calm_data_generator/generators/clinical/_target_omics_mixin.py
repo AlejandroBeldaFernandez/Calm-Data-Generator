@@ -4,7 +4,7 @@ for ClinicalDataGenerator.
 
 import logging
 import re
-from typing import List, Optional, Union
+from typing import Dict, List, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -23,6 +23,7 @@ class _TargetOmicsMixin:
         weights: dict,
         noise_std: float = 0.1,
         binary_threshold: Optional[Union[float, str]] = None,
+        column_groups: Optional[Dict[str, List[str]]] = None,
     ) -> pd.Series:
         """
         Generates a target variable Y as a linear combination of demographic and omics features.
@@ -30,17 +31,28 @@ class _TargetOmicsMixin:
         Args:
             demographic_df (pd.DataFrame): Demographic data.
             omics_dfs (list[pd.DataFrame] | pd.DataFrame): One or more omics dataframes.
-            weights (dict): Dictionary mapping column names (or regex patterns) to coefficients.
-                            Example: {'Age': 0.3, 'Sex': 0.1, 'G_.*': 0.01}
-                            When a pattern matches multiple columns, weight is applied to their mean.
+            weights (dict): Dictionary mapping column names, regex patterns, OR group names
+                            to coefficients. Example: {'Age': 0.3, 'Sex': 0.1, 'A': 0.2}
+                            A key is resolved as a group name first (see `column_groups`
+                            below); if it doesn't match any group, it falls back to being
+                            treated as a regex pattern matched against column names.
+                            When a key resolves to multiple columns (group or regex match),
+                            the weight is applied to their mean.
             noise_std (float): Standard deviation of the Gaussian noise added to Y.
             binary_threshold (float | 'median' | None): If float, binarizes Y at that value.
                             If 'median', binarizes at the median (guarantees 50/50 balance).
                             If None, returns continuous Y.
+            column_groups (Optional[Dict[str, List[str]]]): Mapping of group name -> exact
+                            column list, so `weights` can reference a whole group by name
+                            (e.g. `{"A": 0.2}`) instead of a regex. Defaults to
+                            `self.gene_groups`, the groups recorded by a prior
+                            `generate_gene_data(gene_groups=...)` call on this instance, if any.
 
         Returns:
             pd.Series: The generated target variable Y.
         """
+        if column_groups is None:
+            column_groups = getattr(self, "gene_groups", None)
         if isinstance(omics_dfs, pd.DataFrame):
             omics_dfs = [omics_dfs]
 
@@ -68,13 +80,22 @@ class _TargetOmicsMixin:
         Y = np.zeros(n_samples)
 
         for pattern, weight in weights.items():
-            regex = re.compile(pattern)
-            matched_cols = [col for col in full_df.columns if regex.match(col)]
+            if column_groups and pattern in column_groups:
+                # Resolve against a named group first (exact columns, no regex ambiguity).
+                matched_cols = [c for c in column_groups[pattern] if c in full_df.columns]
+                if not matched_cols:
+                    logger.warning(
+                        "Group '%s' has no columns present in the joined DataFrame.", pattern
+                    )
+                    continue
+            else:
+                regex = re.compile(pattern)
+                matched_cols = [col for col in full_df.columns if regex.match(col)]
 
-            if not matched_cols:
-                logger.warning("No columns matched pattern '%s'. Available columns sample: %s",
-                               pattern, list(full_df.columns[:10]))
-                continue
+                if not matched_cols:
+                    logger.warning("No columns matched pattern '%s'. Available columns sample: %s",
+                                   pattern, list(full_df.columns[:10]))
+                    continue
 
             numeric_cols = [c for c in matched_cols if pd.api.types.is_numeric_dtype(full_df[c])]
             non_numeric = set(matched_cols) - set(numeric_cols)

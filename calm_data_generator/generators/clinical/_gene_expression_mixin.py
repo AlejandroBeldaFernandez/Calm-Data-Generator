@@ -32,10 +32,21 @@ class _GeneExpressionMixin:
         random_state: int = 42,
         drift_injection_config: Optional[List[Dict]] = None,
         dynamics_config: Optional[Dict] = None,
+        gene_groups: Optional[Dict[str, int]] = None,
     ):
         """
         Generates synthetic gene expression data.
         Supports heterogeneous disease effects via a structured `disease_effects_config`.
+
+        Args:
+            gene_groups (Optional[Dict[str, int]]): Ordered mapping of group name -> number
+                of genes in that group (e.g. {"A": 100, "B": 200, "D": 300, "NS": 400}).
+                Genes are assigned to groups sequentially in generation order (same
+                convention as `tutorials.clinical_generator.build_correlation_matrix`).
+                Stored on `self.gene_groups` as {group_name: [actual "G_i" column names]}
+                so a later `generate_target_variable(weights=...)` call can reference a
+                group by name (e.g. `weights={"A": 0.2}`) instead of hand-building a
+                regex or column list.
         """
         if gene_type.lower() not in ["rna-seq", "microarray"]:
             raise ValueError("gene_type must be 'RNA-Seq' or 'Microarray'.")
@@ -102,6 +113,21 @@ class _GeneExpressionMixin:
         df_genes = pd.DataFrame(
             X_genes_base, columns=[f"G_{i}" for i in range(n_genes)], index=patient_ids
         )
+
+        # --- Gene groups bookkeeping (for later target-variable correlation by group) ---
+        if gene_groups:
+            total_group_genes = sum(gene_groups.values())
+            if total_group_genes > n_genes:
+                raise ValueError(
+                    f"gene_groups sizes sum to {total_group_genes}, exceeding n_genes={n_genes}."
+                )
+            self.gene_groups = {}
+            current_idx = 0
+            for group_name, size in gene_groups.items():
+                self.gene_groups[group_name] = df_genes.columns[
+                    current_idx : current_idx + size
+                ].tolist()
+                current_idx += size
 
         # --- 4. Apply Heterogeneous Disease Effects via Subgroups ---
         if disease_effects_config and len(idx_disease) > 0:
