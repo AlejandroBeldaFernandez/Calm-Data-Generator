@@ -4,6 +4,19 @@ All notable changes to CALM-Data-Generator are documented here.
 
 ---
 
+## [2.3.2] — 2026-07-22
+
+### Infrastructure
+
+- Repository transferred to the **CALMDataGenerator** GitHub organization. All project URLs
+  (`pyproject.toml`, `CITATION.cff`, READMEs, CLI, docs) updated to the new location, which
+  also fixes references still pointing at the previous repository name.
+- Releases are now published to PyPI via **Trusted Publishing** (OIDC) from a GitHub Actions
+  workflow, replacing token-based uploads. Publishing is now tied to the repository rather
+  than to an individual account, and no credentials are stored anywhere.
+
+---
+
 ## [2.3.1] — 2026-07-21
 
 ### Documentation
