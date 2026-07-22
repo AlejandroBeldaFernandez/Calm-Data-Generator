@@ -35,8 +35,8 @@ Aceptamos activamente tus pull requests.
 
 ```bash
 # Clona tu fork
-git clone https://github.com/TU-USUARIO/Calm-Data_Generator.git
-cd Calm-Data_Generator
+git clone https://github.com/TU-USUARIO/Calm-Data-Generator.git
+cd Calm-Data-Generator
 
 # Crea venv
 python3 -m venv venv

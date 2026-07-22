@@ -335,11 +335,11 @@ pip install "calm-data-generator[full]"
 
 ```bash
 # Opción A: Instalar directamente desde GitHub
-pip install git+https://github.com/AlejandroBeldaFernandez/Calm-Data_Generator.git
+pip install git+https://github.com/CALMDataGenerator/Calm-Data-Generator.git
 
 # Opción B: Clonar e instalar (para desarrollo)
-git clone https://github.com/AlejandroBeldaFernandez/Calm-Data_Generator.git
-cd Calm-Data_Generator
+git clone https://github.com/CALMDataGenerator/Calm-Data-Generator.git
+cd Calm-Data-Generator
 pip install .
 ```
 
@@ -666,7 +666,7 @@ La evaluación single-cell integrada mediante `use_scgft` se apoya en [scGFT Eva
 
 Consulta [AUTHORS](AUTHORS) para la atribución completa y [CITATION.cff](CITATION.cff) si necesitas citar este software en trabajos académicos.
 
-**Contacto:** [calmdatagenerator@outlook.es](mailto:calmdatagenerator@outlook.es) — para dudas sobre la librería. Para errores y peticiones de funcionalidades, abre un [issue](https://github.com/AlejandroBeldaFernandez/Calm-Data-Generator/issues).
+**Contacto:** [calmdatagenerator@outlook.es](mailto:calmdatagenerator@outlook.es) — para dudas sobre la librería. Para errores y peticiones de funcionalidades, abre un [issue](https://github.com/CALMDataGenerator/Calm-Data-Generator/issues).
 
 ---
 

@@ -815,7 +815,7 @@ calm-data-generator docs
 ## Support
 
 For issues and questions:
-- GitHub Issues: [https://github.com/AlejandroBeldaFernandez/Calm-Data_Generator/issues](https://github.com/AlejandroBeldaFernandez/Calm-Data_Generator/issues)
+- GitHub Issues: [https://github.com/CALMDataGenerator/Calm-Data-Generator/issues](https://github.com/CALMDataGenerator/Calm-Data-Generator/issues)
 - Email: alejandrobeldafernandez@gmail.com
 
 ---

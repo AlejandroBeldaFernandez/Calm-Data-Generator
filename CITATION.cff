@@ -14,7 +14,7 @@ authors:
     family-names: Guillen Teruel
     email: a.guillenteruel@um.es
     affiliation: Universidad de Murcia
-repository-code: 'https://github.com/AlejandroBeldaFernandez/Calm-Data-Generator'
+repository-code: 'https://github.com/CALMDataGenerator/Calm-Data-Generator'
 url: 'https://pypi.org/project/calm-data-generator/'
 contact:
   - name: CALM-Data-Generator project

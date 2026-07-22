@@ -43,7 +43,7 @@ def list_tutorials():
         print("❌ Tutorials directory not found.")
         print(f"   Expected at: {tutorials_dir}")
         print("\n   Install from source or check GitHub:")
-        print("   https://github.com/AlejandroBeldaFernandez/Calm-Data_Generator")
+        print("   https://github.com/CALMDataGenerator/Calm-Data-Generator")
         return
 
     tutorials = sorted(tutorials_dir.glob("*.py"))
